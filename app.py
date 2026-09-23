@@ -1,14 +1,16 @@
 import streamlit as st
 import pandas as pd
+
 from sklearn.preprocessing import StandardScaler
 from sklearn.cluster import KMeans
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score
 
-# -------------------------------------------------
+
+# =========================================================
 # PAGE SETTINGS
-# -------------------------------------------------
+# =========================================================
 
 st.set_page_config(
     page_title="Student Performance Prediction",
@@ -16,16 +18,25 @@ st.set_page_config(
     layout="wide"
 )
 
-# -------------------------------------------------
-# LOAD DATA
-# -------------------------------------------------
+
+# =========================================================
+# LOAD DATASET
+# =========================================================
 
 @st.cache_data
 def load_data():
-    return pd.read_csv("data/student_performance.csv")
+
+    return pd.read_csv(
+        "data/student_performance.csv"
+    )
 
 
 data = load_data()
+
+
+# =========================================================
+# FEATURES
+# =========================================================
 
 FEATURES = [
     "Attendance",
@@ -35,21 +46,28 @@ FEATURES = [
     "Previous_Mark"
 ]
 
-# Check columns
-required_columns = FEATURES + ["Performance"]
+REQUIRED_COLUMNS = FEATURES + ["Performance"]
 
-missing = [
-    column for column in required_columns
+
+missing_columns = [
+    column
+    for column in REQUIRED_COLUMNS
     if column not in data.columns
 ]
 
-if missing:
-    st.error(f"Missing columns in CSV: {missing}")
+
+if missing_columns:
+
+    st.error(
+        f"Missing columns in dataset: {missing_columns}"
+    )
+
     st.stop()
 
-# -------------------------------------------------
-# K-MEANS
-# -------------------------------------------------
+
+# =========================================================
+# K-MEANS CLUSTERING
+# =========================================================
 
 scaler = StandardScaler()
 
@@ -57,19 +75,24 @@ X = data[FEATURES]
 
 X_scaled = scaler.fit_transform(X)
 
+
 kmeans = KMeans(
     n_clusters=3,
     random_state=42,
     n_init=10
 )
 
-data["Cluster"] = kmeans.fit_predict(X_scaled)
+data["Cluster"] = kmeans.fit_predict(
+    X_scaled
+)
 
-# -------------------------------------------------
+
+# =========================================================
 # RANDOM FOREST
-# -------------------------------------------------
+# =========================================================
 
 y = data["Performance"]
+
 
 X_train, X_test, y_train, y_test = train_test_split(
     X,
@@ -79,257 +102,619 @@ X_train, X_test, y_train, y_test = train_test_split(
     stratify=y
 )
 
+
 model = RandomForestClassifier(
     n_estimators=100,
     random_state=42
 )
 
-model.fit(X_train, y_train)
 
-y_pred = model.predict(X_test)
+model.fit(
+    X_train,
+    y_train
+)
 
-accuracy = accuracy_score(y_test, y_pred)
 
-# -------------------------------------------------
-# LOGIN
-# -------------------------------------------------
+y_pred = model.predict(
+    X_test
+)
 
-st.title("🎓 Student Performance Prediction System")
+
+accuracy = accuracy_score(
+    y_test,
+    y_pred
+)
+
+
+# =========================================================
+# TITLE
+# =========================================================
+
+st.title(
+    "🎓 Student Performance Prediction System"
+)
 
 st.write(
     "B.Tech S3 – AI & Data Science"
 )
 
-st.divider()
-
-role = st.selectbox(
-    "Select Login Type",
-    ["Student", "Teacher"]
+st.write(
+    "K-Means Clustering + Random Forest Classification"
 )
 
-# -------------------------------------------------
+st.divider()
+
+
+# =========================================================
+# ROLE SELECTION
+# =========================================================
+
+role = st.selectbox(
+    "Select Dashboard",
+    [
+        "Student Dashboard",
+        "Teacher Dashboard"
+    ]
+)
+
+
+# =========================================================
 # STUDENT DASHBOARD
-# -------------------------------------------------
+# =========================================================
 
-if role == "Student":
+if role == "Student Dashboard":
 
-    st.header("👨‍🎓 Student Dashboard")
+    st.header(
+        "👨‍🎓 Student Dashboard"
+    )
 
     st.info(
-        "Enter your academic information to predict your performance."
+        "Enter your student information and academic "
+        "details for each subject."
     )
 
-    student_id = st.text_input(
-        "Student ID",
-        placeholder="Example: S101"
+
+    # -----------------------------------------------------
+    # STUDENT INFORMATION
+    # -----------------------------------------------------
+
+    st.subheader(
+        "👤 Student Information"
     )
 
-    student_name = st.text_input(
-        "Student Name",
-        placeholder="Enter your name"
+    col1, col2 = st.columns(2)
+
+    with col1:
+
+        student_name = st.text_input(
+            "Student Name"
+        )
+
+        university_id = st.text_input(
+            "University ID"
+        )
+
+        semester = st.selectbox(
+            "Semester",
+            [
+                "S1",
+                "S2",
+                "S3",
+                "S4",
+                "S5",
+                "S6",
+                "S7",
+                "S8"
+            ]
+        )
+
+
+    with col2:
+
+        branch = st.selectbox(
+            "Branch",
+            [
+                "AI & Data Science",
+                "Computer Science",
+                "Information Technology",
+                "Electronics & Communication",
+                "Electrical & Electronics",
+                "Mechanical Engineering",
+                "Civil Engineering"
+            ]
+        )
+
+
+    st.divider()
+
+
+    # -----------------------------------------------------
+    # SUBJECT NAMES
+    # -----------------------------------------------------
+
+    st.subheader(
+        "📚 Six Subjects"
     )
 
-    st.subheader("📋 Academic Information")
+    subject_names = []
 
-    attendance = st.slider(
-        "Attendance (%)",
-        0,
-        100,
-        80
-    )
+    subject_columns = st.columns(3)
 
-    study_hours = st.slider(
-        "Study Hours / Day",
-        0.0,
-        12.0,
-        3.0
-    )
 
-    internal = st.slider(
-        "Internal Mark",
-        0,
-        100,
-        65
-    )
+    for i in range(6):
 
-    assignment = st.slider(
-        "Assignment Score",
-        0,
-        100,
-        70
-    )
+        with subject_columns[i % 3]:
 
-    previous = st.slider(
-        "Previous Mark",
-        0,
-        100,
-        65
-    )
-
-    if st.button(
-        "🔮 Predict My Performance",
-        type="primary",
-        width="stretch"
-    ):
-
-        if not student_id or not student_name:
-
-            st.warning(
-                "Please enter your Student ID and Name."
+            subject = st.text_input(
+                f"Subject {i + 1}",
+                key=f"subject_{i}"
             )
 
-        else:
+            subject_names.append(
+                subject
+            )
 
-            student = pd.DataFrame([{
+
+    st.divider()
+
+
+    # -----------------------------------------------------
+    # ACADEMIC INFORMATION
+    # -----------------------------------------------------
+
+    st.subheader(
+        "📊 Academic Information"
+    )
+
+    st.write(
+        "Enter the following details separately for each subject."
+    )
+
+
+    subject_inputs = []
+
+
+    for i in range(6):
+
+        subject = subject_names[i]
+
+        if not subject:
+
+            subject = f"Subject {i + 1}"
+
+
+        st.markdown(
+            f"### 📘 {subject}"
+        )
+
+
+        col1, col2, col3 = st.columns(3)
+
+
+        with col1:
+
+            attendance = st.number_input(
+                "Attendance (%)",
+                min_value=0.0,
+                max_value=100.0,
+                value=80.0,
+                key=f"attendance_{i}"
+            )
+
+
+            study_hours = st.number_input(
+                "Study Hours / Day",
+                min_value=0.0,
+                max_value=24.0,
+                value=3.0,
+                key=f"study_{i}"
+            )
+
+
+        with col2:
+
+            internal = st.number_input(
+                "Internal Mark",
+                min_value=0.0,
+                max_value=100.0,
+                value=65.0,
+                key=f"internal_{i}"
+            )
+
+
+            assignment = st.number_input(
+                "Assignment Score",
+                min_value=0.0,
+                max_value=100.0,
+                value=70.0,
+                key=f"assignment_{i}"
+            )
+
+
+        with col3:
+
+            previous = st.number_input(
+                "Previous Mark",
+                min_value=0.0,
+                max_value=100.0,
+                value=65.0,
+                key=f"previous_{i}"
+            )
+
+
+        subject_inputs.append(
+            {
+                "Subject": subject,
                 "Attendance": attendance,
                 "Study_Hours": study_hours,
                 "Internal_Mark": internal,
                 "Assignment": assignment,
                 "Previous_Mark": previous
-            }])
+            }
+        )
 
-            prediction = model.predict(student)[0]
 
-            probabilities = model.predict_proba(student)[0]
+        st.divider()
 
-            confidence = probabilities.max() * 100
 
-            student_scaled = scaler.transform(student)
+    # -----------------------------------------------------
+    # PREDICTION BUTTON
+    # -----------------------------------------------------
+
+    if st.button(
+        "🔮 Predict Performance for All Subjects",
+        type="primary",
+        width="stretch"
+    ):
+
+
+        if not student_name:
+
+            st.warning(
+                "Please enter Student Name."
+            )
+
+            st.stop()
+
+
+        if not university_id:
+
+            st.warning(
+                "Please enter University ID."
+            )
+
+            st.stop()
+
+
+        results = []
+
+
+        # -------------------------------------------------
+        # PREDICT EACH SUBJECT SEPARATELY
+        # -------------------------------------------------
+
+        for subject_data in subject_inputs:
+
+
+            input_data = pd.DataFrame(
+                [
+                    {
+                        "Attendance":
+                            subject_data["Attendance"],
+
+                        "Study_Hours":
+                            subject_data["Study_Hours"],
+
+                        "Internal_Mark":
+                            subject_data["Internal_Mark"],
+
+                        "Assignment":
+                            subject_data["Assignment"],
+
+                        "Previous_Mark":
+                            subject_data["Previous_Mark"]
+                    }
+                ]
+            )
+
+
+            prediction = model.predict(
+                input_data
+            )[0]
+
+
+            probabilities = model.predict_proba(
+                input_data
+            )[0]
+
+
+            confidence = (
+                probabilities.max() * 100
+            )
+
+
+            scaled_input = scaler.transform(
+                input_data
+            )
+
 
             cluster = int(
-                kmeans.predict(student_scaled)[0]
+                kmeans.predict(
+                    scaled_input
+                )[0]
             )
 
-            st.success(
-                f"🎓 Predicted Performance: {prediction}"
+
+            results.append(
+                {
+                    "Subject":
+                        subject_data["Subject"],
+
+                    "Prediction":
+                        prediction,
+
+                    "Confidence (%)":
+                        round(
+                            confidence,
+                            1
+                        ),
+
+                    "Cluster":
+                        cluster
+                }
             )
 
-            col1, col2 = st.columns(2)
 
-            with col1:
+        results_df = pd.DataFrame(
+            results
+        )
 
-                st.metric(
-                    "Model Confidence",
-                    f"{confidence:.1f}%"
-                )
 
-            with col2:
+        # -------------------------------------------------
+        # STUDENT INFORMATION
+        # -------------------------------------------------
 
-                st.metric(
-                    "Student Cluster",
-                    cluster
-                )
+        st.success(
+            "Performance prediction completed!"
+        )
 
-            st.subheader("👤 Student Information")
 
-            st.write(f"**Name:** {student_name}")
-            st.write(f"**Student ID:** {student_id}")
+        st.subheader(
+            "👤 Student Information"
+        )
 
-            st.subheader("📊 Your Academic Details")
 
-            st.dataframe(
-                student,
-                width="stretch"
-            )
+        student_info = pd.DataFrame(
+            {
+                "Information": [
+                    "Student Name",
+                    "University ID",
+                    "Semester",
+                    "Branch"
+                ],
 
-            st.subheader("💡 Recommendation")
+                "Value": [
+                    student_name,
+                    university_id,
+                    semester,
+                    branch
+                ]
+            }
+        )
+
+
+        st.dataframe(
+            student_info,
+            width="stretch",
+            hide_index=True
+        )
+
+
+        # -------------------------------------------------
+        # SUBJECT-WISE RESULTS
+        # -------------------------------------------------
+
+        st.subheader(
+            "📊 Subject-wise Performance Prediction"
+        )
+
+
+        st.dataframe(
+            results_df,
+            width="stretch",
+            hide_index=True
+        )
+
+
+        # -------------------------------------------------
+        # INDIVIDUAL SUBJECT RESULTS
+        # -------------------------------------------------
+
+        st.subheader(
+            "📚 Individual Subject Results"
+        )
+
+
+        for result in results:
+
+            prediction = result[
+                "Prediction"
+            ]
+
 
             if prediction == "High":
 
                 st.success(
-                    "Excellent performance. "
-                    "Continue your current study pattern."
+                    f"📗 {result['Subject']} → "
+                    f"High Performance "
+                    f"({result['Confidence (%)']}% confidence)"
                 )
+
 
             elif prediction == "Medium":
 
                 st.warning(
-                    "Your performance is moderate. "
-                    "Try improving study hours, attendance "
-                    "and assignment performance."
+                    f"📙 {result['Subject']} → "
+                    f"Medium Performance "
+                    f"({result['Confidence (%)']}% confidence)"
                 )
+
 
             else:
 
                 st.error(
-                    "Additional academic support is recommended. "
-                    "Focus on attendance, study hours and assignments."
+                    f"📕 {result['Subject']} → "
+                    f"Low Performance "
+                    f"({result['Confidence (%)']}% confidence)"
                 )
 
-            st.caption(
-                "Your input is used only for this prediction "
-                "and is not displayed in the student dashboard dataset."
+
+        # -------------------------------------------------
+        # RECOMMENDATION
+        # -------------------------------------------------
+
+        st.subheader(
+            "💡 Academic Recommendation"
+        )
+
+
+        low_subjects = results_df[
+            results_df["Prediction"] == "Low"
+        ]["Subject"].tolist()
+
+
+        medium_subjects = results_df[
+            results_df["Prediction"] == "Medium"
+        ]["Subject"].tolist()
+
+
+        if low_subjects:
+
+            st.error(
+                "Additional academic attention is "
+                "recommended for: "
+                + ", ".join(low_subjects)
             )
 
-# -------------------------------------------------
+
+        elif medium_subjects:
+
+            st.warning(
+                "Consider improving academic performance in: "
+                + ", ".join(medium_subjects)
+            )
+
+
+        else:
+
+            st.success(
+                "Excellent! All subjects are predicted "
+                "at High performance level."
+            )
+
+
+        st.caption(
+            "The predictions are machine-learning estimates "
+            "and should be used as academic guidance."
+        )
+
+
+# =========================================================
 # TEACHER DASHBOARD
-# -------------------------------------------------
+# =========================================================
 
 else:
 
-    st.header("👩‍🏫 Teacher Dashboard")
-
-    st.info(
-        "Teacher access is required to view student data and analytics."
+    st.header(
+        "👩‍🏫 Teacher Dashboard"
     )
 
-    teacher_username = st.text_input(
+    st.info(
+        "Teacher access is required to view the student dataset."
+    )
+
+
+    username = st.text_input(
         "Teacher Username"
     )
 
-    teacher_password = st.text_input(
+
+    password = st.text_input(
         "Teacher Password",
         type="password"
     )
+
 
     if st.button(
         "🔐 Teacher Login",
         type="primary"
     ):
 
-        # DEMO LOGIN
         if (
-            teacher_username == "teacher"
-            and teacher_password == "teacher123"
+            username == "teacher"
+            and password == "teacher123"
         ):
 
-            st.session_state["teacher_logged_in"] = True
+            st.session_state[
+                "teacher_logged_in"
+            ] = True
 
         else:
 
             st.error(
-                "Invalid teacher username or password."
+                "Invalid username or password."
             )
+
 
     if st.session_state.get(
         "teacher_logged_in",
         False
     ):
 
+
         st.success(
             "Teacher login successful."
         )
 
+
         st.divider()
 
-        # Statistics
-        st.subheader("📊 Student Statistics")
+
+        # -------------------------------------------------
+        # STATISTICS
+        # -------------------------------------------------
+
+        st.subheader(
+            "📊 Student Statistics"
+        )
+
 
         total_students = len(data)
 
+
         high_count = len(
-            data[data["Performance"] == "High"]
+            data[
+                data["Performance"] == "High"
+            ]
         )
+
 
         medium_count = len(
-            data[data["Performance"] == "Medium"]
+            data[
+                data["Performance"] == "Medium"
+            ]
         )
+
 
         low_count = len(
-            data[data["Performance"] == "Low"]
+            data[
+                data["Performance"] == "Low"
+            ]
         )
 
+
         col1, col2, col3, col4 = st.columns(4)
+
 
         with col1:
 
@@ -338,12 +723,14 @@ else:
                 total_students
             )
 
+
         with col2:
 
             st.metric(
                 "High",
                 high_count
             )
+
 
         with col3:
 
@@ -352,6 +739,7 @@ else:
                 medium_count
             )
 
+
         with col4:
 
             st.metric(
@@ -359,24 +747,41 @@ else:
                 low_count
             )
 
+
         st.divider()
 
-        # Model accuracy
-        st.subheader("🤖 Model Performance")
+
+        # -------------------------------------------------
+        # MODEL PERFORMANCE
+        # -------------------------------------------------
+
+        st.subheader(
+            "🤖 Model Performance"
+        )
+
 
         st.metric(
             "Random Forest Accuracy",
             f"{accuracy * 100:.2f}%"
         )
 
+
         st.write(
             "K-Means Clusters: **3**"
         )
 
+
         st.divider()
 
-        # Dataset
-        st.subheader("📋 Student Dataset")
+
+        # -------------------------------------------------
+        # DATASET
+        # -------------------------------------------------
+
+        st.subheader(
+            "📋 Student Dataset"
+        )
+
 
         st.dataframe(
             data,
@@ -384,37 +789,54 @@ else:
             hide_index=True
         )
 
+
         st.divider()
 
-        # Performance distribution
+
+        # -------------------------------------------------
+        # PERFORMANCE CHART
+        # -------------------------------------------------
+
         st.subheader(
             "📈 Performance Distribution"
         )
+
 
         performance_counts = (
             data["Performance"]
             .value_counts()
             .rename_axis("Performance")
-            .reset_index(name="Students")
+            .reset_index(
+                name="Students"
+            )
         )
+
 
         st.bar_chart(
-            performance_counts.set_index("Performance")
+            performance_counts.set_index(
+                "Performance"
+            )
         )
 
-        if st.button("Logout"):
 
-            st.session_state["teacher_logged_in"] = False
+        if st.button(
+            "Logout"
+        ):
+
+            st.session_state[
+                "teacher_logged_in"
+            ] = False
 
             st.rerun()
 
-# -------------------------------------------------
+
+# =========================================================
 # FOOTER
-# -------------------------------------------------
+# =========================================================
 
 st.divider()
 
 st.caption(
     "Student Performance Prediction using "
-    "K-Means Clustering and Random Forest Classification"
+    "K-Means Clustering and Random Forest"
 )
