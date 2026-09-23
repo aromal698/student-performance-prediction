@@ -13,24 +13,11 @@ from sklearn.metrics import (
     silhouette_score
 )
 
-from reportlab.lib import colors
-from reportlab.lib.pagesizes import A4
-from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-from reportlab.lib.enums import TA_CENTER
-from reportlab.platypus import (
-    SimpleDocTemplate,
-    Paragraph,
-    Spacer,
-    Table,
-    TableStyle,
-    PageBreak
-)
-
 from io import BytesIO
 
 
 # ============================================================
-# PAGE CONFIGURATION
+# PAGE SETTINGS
 # ============================================================
 
 st.set_page_config(
@@ -67,69 +54,54 @@ TEACHER_PASSWORD = "*ktutech"
 
 
 # ============================================================
-# CUSTOM CSS
+# CSS
 # ============================================================
 
-st.markdown(
-    """
-    <style>
+st.markdown("""
+<style>
 
-    .main-title {
-        text-align: center;
-        font-size: 38px;
-        font-weight: bold;
-        margin-bottom: 5px;
-    }
+.title {
+    text-align: center;
+    font-size: 38px;
+    font-weight: bold;
+}
 
-    .subtitle {
-        text-align: center;
-        font-size: 18px;
-        margin-bottom: 25px;
-    }
+.subtitle {
+    text-align: center;
+    font-size: 18px;
+    margin-bottom: 25px;
+}
 
-    .login-box {
-        padding: 25px;
-        border-radius: 15px;
-        border: 1px solid #dddddd;
-        margin-top: 20px;
-    }
+.low-box {
+    padding: 15px;
+    border: 2px solid red;
+    border-radius: 12px;
+    margin-bottom: 10px;
+}
 
-    .good-card {
-        padding: 15px;
-        border-radius: 12px;
-        border: 2px solid #2e7d32;
-        background-color: #f1f8f2;
-        margin-bottom: 10px;
-    }
+.average-box {
+    padding: 15px;
+    border: 2px solid orange;
+    border-radius: 12px;
+    margin-bottom: 10px;
+}
 
-    .average-card {
-        padding: 15px;
-        border-radius: 12px;
-        border: 2px solid #f57c00;
-        background-color: #fff8ef;
-        margin-bottom: 10px;
-    }
+.above-box {
+    padding: 15px;
+    border: 2px solid #e6c300;
+    border-radius: 12px;
+    margin-bottom: 10px;
+}
 
-    .above-card {
-        padding: 15px;
-        border-radius: 12px;
-        border: 2px solid #fbc02d;
-        background-color: #fffde7;
-        margin-bottom: 10px;
-    }
+.good-box {
+    padding: 15px;
+    border: 2px solid green;
+    border-radius: 12px;
+    margin-bottom: 10px;
+}
 
-    .low-card {
-        padding: 15px;
-        border-radius: 12px;
-        border: 2px solid #d32f2f;
-        background-color: #fff5f5;
-        margin-bottom: 10px;
-    }
-
-    </style>
-    """,
-    unsafe_allow_html=True
-)
+</style>
+""", unsafe_allow_html=True)
 
 
 # ============================================================
@@ -145,7 +117,7 @@ def load_data():
 
 
 # ============================================================
-# TRAIN MODELS
+# TRAIN MODEL
 # ============================================================
 
 @st.cache_resource
@@ -153,24 +125,26 @@ def train_models():
 
     data = load_data()
 
-    # Check required columns
     required_columns = FEATURES + ["Performance"]
 
-    missing_columns = [
-        col for col in required_columns
-        if col not in data.columns
+    missing = [
+        column
+        for column in required_columns
+        if column not in data.columns
     ]
 
-    if missing_columns:
+    if missing:
         raise ValueError(
-            f"Missing columns in dataset: {missing_columns}"
+            "Missing columns in dataset: "
+            + ", ".join(missing)
         )
 
     X = data[FEATURES].copy()
+
     y = data["Performance"].copy()
 
     # --------------------------------------------------------
-    # Scaling
+    # SCALING
     # --------------------------------------------------------
 
     scaler = StandardScaler()
@@ -191,7 +165,6 @@ def train_models():
 
     data["Cluster"] = clusters
 
-    # Silhouette score
     try:
         silhouette = silhouette_score(
             X_scaled,
@@ -229,15 +202,15 @@ def train_models():
         y_pred
     )
 
-    report = classification_report(
-        y_test,
-        y_pred,
-        output_dict=True
-    )
-
     report_text = classification_report(
         y_test,
         y_pred
+    )
+
+    report_dict = classification_report(
+        y_test,
+        y_pred,
+        output_dict=True
     )
 
     matrix = confusion_matrix(
@@ -252,8 +225,8 @@ def train_models():
         model,
         accuracy,
         silhouette,
-        report,
         report_text,
+        report_dict,
         matrix
     )
 
@@ -279,15 +252,14 @@ def attendance_mark(attendance):
     elif attendance >= 10:
         return 1
 
-    else:
-        return 0
+    return 0
 
 
 # ============================================================
 # PERFORMANCE LEVEL
 # ============================================================
 
-def calculate_performance_level(
+def get_performance_level(
     attendance,
     study_hours,
     internal,
@@ -295,22 +267,20 @@ def calculate_performance_level(
     previous
 ):
 
-    attendance_score = attendance_mark(attendance)
-
     attendance_percent = (
-        attendance_score / 5
+        attendance_mark(attendance) / 5
     ) * 100
 
     internal_percent = (
         internal / 40
     ) * 100
 
-    previous_percent = (
-        previous / 60
-    ) * 100
-
     assignment_percent = (
         assignment / 15
+    ) * 100
+
+    previous_percent = (
+        previous / 60
     ) * 100
 
     study_percent = (
@@ -322,51 +292,52 @@ def calculate_performance_level(
         100
     )
 
-    overall_percent = np.mean([
+    overall = np.mean([
         attendance_percent,
         internal_percent,
-        previous_percent,
         assignment_percent,
+        previous_percent,
         study_percent
     ])
 
-    if overall_percent < 50:
+    if overall < 50:
 
-        level = "Low Performance"
-        indicator = "RED"
-        symbol = "🔴"
+        return (
+            overall,
+            "Low Performance",
+            "🔴"
+        )
 
-    elif overall_percent < 65:
+    elif overall < 65:
 
-        level = "Average Performance"
-        indicator = "ORANGE"
-        symbol = "🟠"
+        return (
+            overall,
+            "Average Performance",
+            "🟠"
+        )
 
-    elif overall_percent < 80:
+    elif overall < 80:
 
-        level = "Above Average"
-        indicator = "YELLOW"
-        symbol = "🟡"
+        return (
+            overall,
+            "Above Average",
+            "🟡"
+        )
 
     else:
 
-        level = "Good Performance"
-        indicator = "GREEN"
-        symbol = "🟢"
-
-    return (
-        overall_percent,
-        level,
-        indicator,
-        symbol
-    )
+        return (
+            overall,
+            "Good Performance",
+            "🟢"
+        )
 
 
 # ============================================================
 # RECOMMENDATIONS
 # ============================================================
 
-def generate_recommendations(
+def recommendations(
     attendance,
     study_hours,
     internal,
@@ -375,86 +346,86 @@ def generate_recommendations(
     level
 ):
 
-    recommendations = []
+    result = []
 
     if attendance < 75:
-        recommendations.append(
-            "Improve class attendance and attend lectures regularly."
+
+        result.append(
+            "Improve attendance and attend classes regularly."
         )
 
     if study_hours < 2:
-        recommendations.append(
+
+        result.append(
             "Increase daily study time gradually."
         )
 
     if internal < 20:
-        recommendations.append(
-            "Focus more on internal examinations and regular revision."
+
+        result.append(
+            "Focus more on internal examinations."
         )
 
     if assignment < 8:
-        recommendations.append(
-            "Complete assignments on time and improve assignment quality."
+
+        result.append(
+            "Complete assignments regularly and on time."
         )
 
     if previous < 30:
-        recommendations.append(
+
+        result.append(
             "Revise previous topics and strengthen basic concepts."
         )
 
     if level == "Low Performance":
 
-        recommendations.append(
-            "Prepare a weekly study timetable and follow it consistently."
+        result.append(
+            "Prepare a weekly study timetable."
         )
 
-        recommendations.append(
-            "Discuss difficult topics with teachers or classmates."
+        result.append(
+            "Ask teachers for help with difficult topics."
         )
 
     elif level == "Average Performance":
 
-        recommendations.append(
+        result.append(
             "Maintain regular revision and improve consistency."
         )
 
-        recommendations.append(
-            "Try additional practice questions before examinations."
+        result.append(
+            "Practice more questions before examinations."
         )
 
     elif level == "Above Average":
 
-        recommendations.append(
-            "Small improvements in attendance, internal marks and assignments can further improve performance."
+        result.append(
+            "Make small improvements in attendance and internal marks."
         )
 
-        recommendations.append(
-            "Continue regular revision and practice."
+        result.append(
+            "Continue regular study and revision."
         )
 
     else:
 
-        recommendations.append(
-            "Excellent performance. Maintain the same level of consistency."
+        result.append(
+            "Excellent performance. Maintain the same consistency."
         )
 
-        recommendations.append(
-            "Continue regular study, attendance and assignment submission."
+        result.append(
+            "Continue regular attendance and assignment submission."
         )
 
-    # Remove duplicates
-    recommendations = list(
-        dict.fromkeys(recommendations)
-    )
-
-    return recommendations
+    return list(dict.fromkeys(result))
 
 
 # ============================================================
-# NORMALIZE STUDENT INPUT FOR MODEL
+# PREPARE MODEL INPUT
 # ============================================================
 
-def prepare_model_input(
+def prepare_input(
     attendance,
     study_hours,
     internal,
@@ -462,8 +433,12 @@ def prepare_model_input(
     previous
 ):
 
-    # Dataset model expects marks in approximately 0-100 scale.
-    # Student UI uses the requested real maximums.
+    # Convert UI values to approximately 0-100 scale
+    # used by the existing model.
+
+    study_model = (
+        study_hours / 6
+    ) * 100
 
     internal_model = (
         internal / 40
@@ -477,11 +452,7 @@ def prepare_model_input(
         previous / 60
     ) * 100
 
-    study_model = (
-        study_hours / 6
-    ) * 100
-
-    model_input = pd.DataFrame(
+    return pd.DataFrame(
         [[
             attendance,
             study_model,
@@ -492,14 +463,12 @@ def prepare_model_input(
         columns=FEATURES
     )
 
-    return model_input
-
 
 # ============================================================
-# MODEL PREDICTION
+# PREDICT
 # ============================================================
 
-def predict_subject(
+def predict_student(
     attendance,
     study_hours,
     internal,
@@ -510,7 +479,7 @@ def predict_subject(
     kmeans
 ):
 
-    model_input = prepare_model_input(
+    model_input = prepare_input(
         attendance,
         study_hours,
         internal,
@@ -518,37 +487,32 @@ def predict_subject(
         previous
     )
 
-    # Random Forest prediction
+    # Random Forest
     prediction = model.predict(
         model_input
     )[0]
 
-    probabilities = model.predict_proba(
+    probability = model.predict_proba(
         model_input
     )[0]
 
     confidence = max(
-        probabilities
+        probability
     ) * 100
 
-    # K-Means prediction
-    scaled_input = scaler.transform(
+    # K-Means
+    scaled = scaler.transform(
         model_input
     )
 
     cluster = int(
         kmeans.predict(
-            scaled_input
+            scaled
         )[0]
     )
 
-    # Project-defined reporting level
-    (
-        overall_percent,
-        level,
-        indicator,
-        symbol
-    ) = calculate_performance_level(
+    # Performance level
+    overall, level, symbol = get_performance_level(
         attendance,
         study_hours,
         internal,
@@ -556,7 +520,7 @@ def predict_subject(
         previous
     )
 
-    recommendations = generate_recommendations(
+    suggestions = recommendations(
         attendance,
         study_hours,
         internal,
@@ -569,19 +533,19 @@ def predict_subject(
         "prediction": prediction,
         "confidence": confidence,
         "cluster": cluster,
-        "overall_percent": overall_percent,
+        "overall": overall,
         "level": level,
-        "indicator": indicator,
         "symbol": symbol,
-        "recommendations": recommendations
+        "suggestions": suggestions,
+        "attendance_mark": attendance_mark(attendance)
     }
 
 
 # ============================================================
-# PDF REPORT GENERATION
+# CREATE HTML PROGRESS REPORT
 # ============================================================
 
-def generate_pdf(
+def create_progress_report(
     student_name,
     university_id,
     semester,
@@ -590,394 +554,306 @@ def generate_pdf(
     results
 ):
 
-    buffer = BytesIO()
-
-    document = SimpleDocTemplate(
-        buffer,
-        pagesize=A4,
-        rightMargin=35,
-        leftMargin=35,
-        topMargin=35,
-        bottomMargin=35
-    )
-
-    styles = getSampleStyleSheet()
-
-    title_style = ParagraphStyle(
-        "TitleCustom",
-        parent=styles["Title"],
-        alignment=TA_CENTER,
-        fontSize=20,
-        spaceAfter=8
-    )
-
-    subtitle_style = ParagraphStyle(
-        "SubtitleCustom",
-        parent=styles["Normal"],
-        alignment=TA_CENTER,
-        fontSize=10,
-        spaceAfter=15
-    )
-
-    heading_style = ParagraphStyle(
-        "HeadingCustom",
-        parent=styles["Heading2"],
-        fontSize=14,
-        spaceBefore=10,
-        spaceAfter=8
-    )
-
-    normal_style = ParagraphStyle(
-        "NormalCustom",
-        parent=styles["Normal"],
-        fontSize=9,
-        leading=13
-    )
-
-    small_style = ParagraphStyle(
-        "SmallCustom",
-        parent=styles["Normal"],
-        fontSize=8,
-        leading=11
-    )
-
-    story = []
-
-    # --------------------------------------------------------
-    # TITLE
-    # --------------------------------------------------------
-
-    story.append(
-        Paragraph(
-            "STUDENT PERFORMANCE PROGRESS REPORT",
-            title_style
-        )
-    )
-
-    story.append(
-        Paragraph(
-            "B.Tech S3 – Artificial Intelligence & Data Science",
-            subtitle_style
-        )
-    )
-
-    story.append(
-        Paragraph(
-            "K-Means Clustering + Random Forest Classification",
-            subtitle_style
-        )
-    )
-
-    # --------------------------------------------------------
-    # STUDENT INFORMATION
-    # --------------------------------------------------------
-
-    story.append(
-        Paragraph(
-            "1. Student Information",
-            heading_style
-        )
-    )
-
-    student_table = Table(
-        [
-            ["Student Name", student_name],
-            ["University ID", university_id],
-            ["Semester", semester],
-            ["Branch", branch],
-            ["DOB Year", str(dob_year)]
-        ],
-        colWidths=[150, 350]
-    )
-
-    student_table.setStyle(
-        TableStyle([
-            ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
-            ("BACKGROUND", (0, 0), (0, -1), colors.lightgrey),
-            ("FONTNAME", (0, 0), (0, -1), "Helvetica-Bold"),
-            ("FONTSIZE", (0, 0), (-1, -1), 9),
-            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-            ("TOPPADDING", (0, 0), (-1, -1), 6),
-            ("BOTTOMPADDING", (0, 0), (-1, -1), 6)
-        ])
-    )
-
-    story.append(student_table)
-
-    story.append(Spacer(1, 15))
-
-    # --------------------------------------------------------
-    # OVERALL SUMMARY
-    # --------------------------------------------------------
-
-    story.append(
-        Paragraph(
-            "2. Overall Performance Summary",
-            heading_style
-        )
-    )
-
-    summary_data = [
-        [
-            "Subject",
-            "Level",
-            "Overall %",
-            "Attendance",
-            "Internal",
-            "Previous",
-            "Assignment"
-        ]
-    ]
+    rows = ""
 
     for subject, result in results.items():
 
-        summary_data.append([
-            subject,
-            result["level"],
-            f'{result["overall_percent"]:.1f}%',
-            f'{result["attendance"]:.0f}%',
-            f'{result["internal"]:.0f}/40',
-            f'{result["previous"]:.0f}/60',
-            f'{result["assignment"]:.0f}/15'
-        ])
-
-    summary_table = Table(
-        summary_data,
-        repeatRows=1,
-        colWidths=[
-            105,
-            80,
-            55,
-            55,
-            55,
-            55,
-            60
-        ]
-    )
-
-    summary_table.setStyle(
-        TableStyle([
-            ("GRID", (0, 0), (-1, -1), 0.4, colors.grey),
-            ("BACKGROUND", (0, 0), (-1, 0), colors.lightgrey),
-            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-            ("FONTSIZE", (0, 0), (-1, -1), 7),
-            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-            ("ALIGN", (2, 1), (-1, -1), "CENTER"),
-            ("TOPPADDING", (0, 0), (-1, -1), 5),
-            ("BOTTOMPADDING", (0, 0), (-1, -1), 5)
-        ])
-    )
-
-    story.append(summary_table)
-
-    story.append(Spacer(1, 15))
-
-    # --------------------------------------------------------
-    # SUBJECT DETAILS
-    # --------------------------------------------------------
-
-    story.append(
-        Paragraph(
-            "3. Subject-wise Detailed Performance",
-            heading_style
-        )
-    )
-
-    for subject, result in results.items():
-
-        story.append(
-            Paragraph(
-                subject,
-                ParagraphStyle(
-                    "SubjectHeading",
-                    parent=styles["Heading3"],
-                    fontSize=12,
-                    spaceBefore=10,
-                    spaceAfter=6
-                )
-            )
-        )
-
-        detail_data = [
-            ["Parameter", "Value"],
-            ["Performance Level", result["level"]],
-            ["Indicator", result["indicator"]],
-            ["Overall Indicator %", f'{result["overall_percent"]:.2f}%'],
-            ["ML Prediction", result["prediction"]],
-            ["Model Confidence", f'{result["confidence"]:.2f}%'],
-            ["K-Means Cluster", str(result["cluster"])],
-            ["Attendance", f'{result["attendance"]:.0f}%'],
+        suggestions = "<br>".join(
             [
-                "Attendance Converted Mark",
-                f'{result["attendance_mark"]}/5'
-            ],
-            ["Internal Mark", f'{result["internal"]:.0f}/40'],
-            ["Previous Mark", f'{result["previous"]:.0f}/60'],
-            ["Assignment Score", f'{result["assignment"]:.0f}/15'],
-            ["Study Hours", f'{result["study_hours"]:.1f}/6 hours/day']
-        ]
-
-        detail_table = Table(
-            detail_data,
-            colWidths=[200, 300]
+                "• " + item
+                for item in result["suggestions"]
+            ]
         )
 
-        detail_table.setStyle(
-            TableStyle([
-                ("GRID", (0, 0), (-1, -1), 0.4, colors.grey),
-                ("BACKGROUND", (0, 0), (-1, 0), colors.lightgrey),
-                ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-                ("FONTNAME", (0, 1), (0, -1), "Helvetica-Bold"),
-                ("FONTSIZE", (0, 0), (-1, -1), 8),
-                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-                ("TOPPADDING", (0, 0), (-1, -1), 5),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 5)
-            ])
-        )
+        rows += f"""
+        <tr>
+            <td>{subject}</td>
+            <td>{result["symbol"]} {result["level"]}</td>
+            <td>{result["overall"]:.1f}%</td>
+            <td>{result["attendance"]:.0f}%</td>
+            <td>{result["attendance_mark"]}/5</td>
+            <td>{result["internal"]:.0f}/40</td>
+            <td>{result["previous"]:.0f}/60</td>
+            <td>{result["assignment"]:.0f}/15</td>
+            <td>{result["study_hours"]:.1f}/6</td>
+            <td>{result["prediction"]}</td>
+        </tr>
 
-        story.append(detail_table)
+        <tr>
+            <td colspan="10">
+                <b>Suggestions:</b><br>
+                {suggestions}
+            </td>
+        </tr>
+        """
 
-        story.append(Spacer(1, 8))
+    html = f"""
+<!DOCTYPE html>
 
-        story.append(
-            Paragraph(
-                "<b>Improvement / Maintenance Suggestions:</b>",
-                normal_style
-            )
-        )
+<html>
 
-        for recommendation in result["recommendations"]:
+<head>
 
-            story.append(
-                Paragraph(
-                    "• " + recommendation,
-                    normal_style
-                )
-            )
+<meta charset="UTF-8">
 
-        story.append(Spacer(1, 10))
+<title>Student Progress Report</title>
 
-    # --------------------------------------------------------
-    # ATTENDANCE CONVERSION
-    # --------------------------------------------------------
+<style>
 
-    story.append(
-        PageBreak()
-    )
+body {{
+    font-family: Arial, sans-serif;
+    margin: 35px;
+    color: #222;
+}}
 
-    story.append(
-        Paragraph(
-            "4. Attendance Mark Conversion",
-            heading_style
-        )
-    )
+h1 {{
+    text-align: center;
+    font-size: 25px;
+}}
 
-    attendance_table = Table(
-        [
-            ["Attendance", "Converted Mark"],
-            ["90–100%", "5 / 5"],
-            ["80–89%", "4 / 5"],
-            ["70–79%", "3 / 5"],
-            ["60–69%", "2 / 5"],
-            ["10–59%", "1 / 5"],
-            ["Below 10%", "0 / 5"]
-        ],
-        colWidths=[200, 200]
-    )
+h2 {{
+    margin-top: 25px;
+}}
 
-    attendance_table.setStyle(
-        TableStyle([
-            ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
-            ("BACKGROUND", (0, 0), (-1, 0), colors.lightgrey),
-            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-            ("ALIGN", (0, 0), (-1, -1), "CENTER"),
-            ("FONTSIZE", (0, 0), (-1, -1), 9),
-            ("TOPPADDING", (0, 0), (-1, -1), 6),
-            ("BOTTOMPADDING", (0, 0), (-1, -1), 6)
-        ])
-    )
+.subtitle {{
+    text-align: center;
+    font-size: 15px;
+}}
 
-    story.append(attendance_table)
+.info {{
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 20px;
+}}
 
-    story.append(Spacer(1, 15))
+.info td {{
+    border: 1px solid #999;
+    padding: 8px;
+}}
 
-    # --------------------------------------------------------
-    # PERFORMANCE LEVEL
-    # --------------------------------------------------------
+.info td:first-child {{
+    font-weight: bold;
+    width: 30%;
+}}
 
-    story.append(
-        Paragraph(
-            "5. Performance Indicator",
-            heading_style
-        )
-    )
+.report {{
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 15px;
+    font-size: 11px;
+}}
 
-    indicator_table = Table(
-        [
-            ["Indicator", "Performance Level"],
-            ["RED", "Low Performance"],
-            ["ORANGE", "Average Performance"],
-            ["YELLOW", "Above Average"],
-            ["GREEN", "Good Performance"]
-        ],
-        colWidths=[150, 250]
-    )
+.report th,
+.report td {{
+    border: 1px solid #888;
+    padding: 7px;
+    text-align: center;
+}}
 
-    indicator_table.setStyle(
-        TableStyle([
-            ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
-            ("BACKGROUND", (0, 0), (-1, 0), colors.lightgrey),
-            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-            ("ALIGN", (0, 0), (-1, -1), "CENTER"),
-            ("FONTSIZE", (0, 0), (-1, -1), 9),
-            ("TOPPADDING", (0, 0), (-1, -1), 6),
-            ("BOTTOMPADDING", (0, 0), (-1, -1), 6)
-        ])
-    )
+.report th {{
+    background: #eeeeee;
+}}
 
-    story.append(indicator_table)
+.report td[colspan] {{
+    text-align: left;
+    background: #fafafa;
+}}
 
-    story.append(Spacer(1, 20))
+.note {{
+    margin-top: 25px;
+    padding: 12px;
+    border: 1px solid #aaa;
+    background: #f5f5f5;
+    font-size: 12px;
+}}
 
-    # --------------------------------------------------------
-    # NOTE
-    # --------------------------------------------------------
+</style>
 
-    story.append(
-        Paragraph(
-            "<b>Note:</b> The performance indicator scale used in this "
-            "project is a project-defined monitoring scale. It is not "
-            "an official KTU grading standard. The machine-learning "
-            "prediction is intended to support academic monitoring and "
-            "should not replace teacher evaluation.",
-            small_style
-        )
-    )
+</head>
 
-    document.build(story)
+<body>
 
-    buffer.seek(0)
+<h1>STUDENT PERFORMANCE PROGRESS REPORT</h1>
 
-    return buffer
+<div class="subtitle">
+B.Tech S3 – Artificial Intelligence & Data Science
+</div>
+
+<div class="subtitle">
+K-Means Clustering + Random Forest Classification
+</div>
+
+<h2>1. Student Information</h2>
+
+<table class="info">
+
+<tr>
+<td>Student Name</td>
+<td>{student_name}</td>
+</tr>
+
+<tr>
+<td>University ID</td>
+<td>{university_id}</td>
+</tr>
+
+<tr>
+<td>Semester</td>
+<td>{semester}</td>
+</tr>
+
+<tr>
+<td>Branch</td>
+<td>{branch}</td>
+</tr>
+
+<tr>
+<td>DOB Year</td>
+<td>{dob_year}</td>
+</tr>
+
+</table>
+
+
+<h2>2. Subject-wise Performance</h2>
+
+<table class="report">
+
+<tr>
+
+<th>Subject</th>
+<th>Performance</th>
+<th>Overall</th>
+<th>Attendance</th>
+<th>Att. Mark</th>
+<th>Internal</th>
+<th>Previous</th>
+<th>Assignment</th>
+<th>Study Hours</th>
+<th>ML Prediction</th>
+
+</tr>
+
+{rows}
+
+</table>
+
+
+<h2>3. Attendance Conversion</h2>
+
+<table class="report">
+
+<tr>
+<th>Attendance</th>
+<th>Converted Mark</th>
+</tr>
+
+<tr>
+<td>90–100%</td>
+<td>5/5</td>
+</tr>
+
+<tr>
+<td>80–89%</td>
+<td>4/5</td>
+</tr>
+
+<tr>
+<td>70–79%</td>
+<td>3/5</td>
+</tr>
+
+<tr>
+<td>60–69%</td>
+<td>2/5</td>
+</tr>
+
+<tr>
+<td>10–59%</td>
+<td>1/5</td>
+</tr>
+
+<tr>
+<td>Below 10%</td>
+<td>0/5</td>
+</tr>
+
+</table>
+
+
+<h2>4. Performance Indicators</h2>
+
+<table class="report">
+
+<tr>
+<th>Indicator</th>
+<th>Performance Level</th>
+</tr>
+
+<tr>
+<td>🔴 Red</td>
+<td>Low Performance</td>
+</tr>
+
+<tr>
+<td>🟠 Orange</td>
+<td>Average Performance</td>
+</tr>
+
+<tr>
+<td>🟡 Yellow</td>
+<td>Above Average</td>
+</tr>
+
+<tr>
+<td>🟢 Green</td>
+<td>Good Performance</td>
+</tr>
+
+</table>
+
+
+<div class="note">
+
+<b>Note:</b>
+
+The performance indicator scale is a project-defined
+academic monitoring scale and is not an official KTU
+grading standard.
+
+The machine-learning prediction is intended to support
+academic monitoring and should not replace teacher
+evaluation.
+
+</div>
+
+</body>
+
+</html>
+"""
+
+    return html
 
 
 # ============================================================
-# LOGIN SCREEN
+# LOGIN PAGE
 # ============================================================
 
-def login_screen():
+def login_page():
 
     st.markdown(
-        '<div class="main-title">🎓 Student Performance Prediction</div>',
+        '<div class="title">🎓 Student Performance Prediction</div>',
         unsafe_allow_html=True
     )
 
     st.markdown(
-        '<div class="subtitle">B.Tech S3 – Artificial Intelligence & Data Science</div>',
+        '<div class="subtitle">'
+        'B.Tech S3 – Artificial Intelligence & Data Science'
+        '</div>',
         unsafe_allow_html=True
     )
 
-    st.markdown("---")
+    st.divider()
 
     st.subheader("Choose Login")
 
@@ -991,6 +867,7 @@ def login_screen():
         ):
 
             st.session_state.login_type = "student"
+
             st.rerun()
 
     with col2:
@@ -1001,6 +878,7 @@ def login_screen():
         ):
 
             st.session_state.login_type = "teacher"
+
             st.rerun()
 
 
@@ -1011,10 +889,6 @@ def login_screen():
 def student_login():
 
     st.title("🎓 Student Login")
-
-    st.write(
-        "Enter your student password."
-    )
 
     password = st.text_input(
         "Password",
@@ -1039,15 +913,19 @@ def student_login():
                     )
 
                     if 2000 <= year <= 2020:
+
                         valid = True
 
                 except ValueError:
+
                     valid = False
 
         if valid:
 
             st.session_state.logged_in = True
+
             st.session_state.role = "student"
+
             st.session_state.dob_year = int(
                 password[5:]
             )
@@ -1060,11 +938,10 @@ def student_login():
                 "Invalid student password."
             )
 
-    if st.button(
-        "← Back"
-    ):
+    if st.button("← Back"):
 
         st.session_state.login_type = None
+
         st.rerun()
 
 
@@ -1089,6 +966,7 @@ def teacher_login():
         if password == TEACHER_PASSWORD:
 
             st.session_state.logged_in = True
+
             st.session_state.role = "teacher"
 
             st.rerun()
@@ -1099,11 +977,10 @@ def teacher_login():
                 "Invalid teacher password."
             )
 
-    if st.button(
-        "← Back"
-    ):
+    if st.button("← Back"):
 
         st.session_state.login_type = None
+
         st.rerun()
 
 
@@ -1120,38 +997,27 @@ def student_dashboard():
         model,
         accuracy,
         silhouette,
-        report,
         report_text,
+        report_dict,
         matrix
     ) = train_models()
 
-    st.title(
-        "🎓 Student Dashboard"
-    )
-
-    st.caption(
-        "Student Performance Prediction using K-Means and Random Forest"
-    )
-
-    # --------------------------------------------------------
-    # TOP BAR
-    # --------------------------------------------------------
+    st.title("🎓 Student Dashboard")
 
     col1, col2 = st.columns([4, 1])
 
     with col1:
 
         st.success(
-            "Student Login Successful"
+            "Student login successful."
         )
 
     with col2:
 
-        if st.button(
-            "Logout"
-        ):
+        if st.button("Logout"):
 
             st.session_state.clear()
+
             st.rerun()
 
     st.divider()
@@ -1201,18 +1067,14 @@ def student_dashboard():
     st.divider()
 
     # --------------------------------------------------------
-    # SUBJECT INPUTS
+    # SUBJECT DATA
     # --------------------------------------------------------
 
     st.subheader(
         "2. Subject-wise Academic Details"
     )
 
-    st.info(
-        "Enter the academic details separately for each subject."
-    )
-
-    subject_inputs = {}
+    subject_data = {}
 
     for subject in SUBJECTS:
 
@@ -1220,9 +1082,9 @@ def student_dashboard():
             f"### 📘 {subject}"
         )
 
-        col1, col2, col3 = st.columns(3)
+        c1, c2, c3 = st.columns(3)
 
-        with col1:
+        with c1:
 
             attendance = st.number_input(
                 "Attendance (%)",
@@ -1242,7 +1104,7 @@ def student_dashboard():
                 key=f"{subject}_study"
             )
 
-        with col2:
+        with c2:
 
             internal = st.number_input(
                 "Internal Mark / 40",
@@ -1262,7 +1124,7 @@ def student_dashboard():
                 key=f"{subject}_assignment"
             )
 
-        with col3:
+        with c3:
 
             previous = st.number_input(
                 "Previous Mark / 60",
@@ -1274,11 +1136,11 @@ def student_dashboard():
             )
 
             st.write(
-                f"Attendance converted mark: "
+                "Attendance Mark:",
                 f"**{attendance_mark(attendance)}/5**"
             )
 
-        subject_inputs[subject] = {
+        subject_data[subject] = {
             "attendance": attendance,
             "study_hours": study_hours,
             "internal": internal,
@@ -1301,7 +1163,7 @@ def student_dashboard():
         if not student_name.strip():
 
             st.warning(
-                "Please enter the Student Name."
+                "Please enter Student Name."
             )
 
             return
@@ -1309,51 +1171,48 @@ def student_dashboard():
         if not university_id.strip():
 
             st.warning(
-                "Please enter the University ID."
+                "Please enter University ID."
             )
 
             return
 
         results = {}
 
-        with st.spinner(
-            "Analysing student performance..."
-        ):
+        for subject, values in subject_data.items():
 
-            for subject, values in subject_inputs.items():
+            prediction = predict_student(
+                values["attendance"],
+                values["study_hours"],
+                values["internal"],
+                values["assignment"],
+                values["previous"],
+                model,
+                scaler,
+                kmeans
+            )
 
-                prediction_result = predict_subject(
-                    values["attendance"],
-                    values["study_hours"],
-                    values["internal"],
-                    values["assignment"],
-                    values["previous"],
-                    model,
-                    scaler,
-                    kmeans
-                )
+            results[subject] = {
+                **values,
+                **prediction
+            }
 
-                results[subject] = {
-                    **values,
-                    **prediction_result,
-                    "attendance_mark": attendance_mark(
-                        values["attendance"]
-                    )
-                }
+        st.session_state.results = results
 
-        st.session_state.student_results = results
         st.session_state.student_name = student_name
+
         st.session_state.university_id = university_id
+
         st.session_state.semester = semester
+
         st.session_state.branch = branch
 
     # --------------------------------------------------------
-    # SHOW RESULTS
+    # RESULTS
     # --------------------------------------------------------
 
-    if "student_results" in st.session_state:
+    if "results" in st.session_state:
 
-        results = st.session_state.student_results
+        results = st.session_state.results
 
         st.divider()
 
@@ -1366,100 +1225,126 @@ def student_dashboard():
             level = result["level"]
 
             if level == "Low Performance":
-                card_class = "low-card"
+                box = "low-box"
 
             elif level == "Average Performance":
-                card_class = "average-card"
+                box = "average-box"
 
             elif level == "Above Average":
-                card_class = "above-card"
+                box = "above-box"
 
             else:
-                card_class = "good-card"
+                box = "good-box"
 
             st.markdown(
                 f"""
-                <div class="{card_class}">
-                    <h3>{result["symbol"]} {subject}</h3>
-                    <b>Performance:</b> {result["level"]}<br>
-                    <b>Overall Indicator:</b>
-                    {result["overall_percent"]:.1f}%<br>
-                    <b>ML Prediction:</b>
-                    {result["prediction"]}<br>
-                    <b>Confidence:</b>
-                    {result["confidence"]:.1f}%<br>
-                    <b>K-Means Cluster:</b>
-                    {result["cluster"]}
+                <div class="{box}">
+
+                <h3>
+                {result["symbol"]} {subject}
+                </h3>
+
+                <b>Performance:</b>
+                {result["level"]}
+
+                <br>
+
+                <b>Overall Indicator:</b>
+                {result["overall"]:.1f}%
+
+                <br>
+
+                <b>ML Prediction:</b>
+                {result["prediction"]}
+
+                <br>
+
+                <b>Model Confidence:</b>
+                {result["confidence"]:.1f}%
+
+                <br>
+
+                <b>K-Means Cluster:</b>
+                {result["cluster"]}
+
                 </div>
                 """,
                 unsafe_allow_html=True
             )
 
         # ----------------------------------------------------
-        # OVERALL TABLE
+        # TABLE
         # ----------------------------------------------------
 
         st.subheader(
             "4. Overall Academic Information"
         )
 
-        table_rows = []
+        table = []
 
         for subject, result in results.items():
 
-            table_rows.append({
+            table.append({
                 "Subject": subject,
-                "Attendance": f'{result["attendance"]:.0f}%',
-                "Attendance Mark": f'{result["attendance_mark"]}/5',
-                "Internal": f'{result["internal"]:.0f}/40',
-                "Previous": f'{result["previous"]:.0f}/60',
-                "Assignment": f'{result["assignment"]:.0f}/15',
-                "Study Hours": f'{result["study_hours"]:.1f}/6',
-                "ML Prediction": result["prediction"],
-                "Performance": result["level"]
+                "Attendance": (
+                    f'{result["attendance"]:.0f}%'
+                ),
+                "Attendance Mark": (
+                    f'{result["attendance_mark"]}/5'
+                ),
+                "Internal": (
+                    f'{result["internal"]:.0f}/40'
+                ),
+                "Previous": (
+                    f'{result["previous"]:.0f}/60'
+                ),
+                "Assignment": (
+                    f'{result["assignment"]:.0f}/15'
+                ),
+                "Study Hours": (
+                    f'{result["study_hours"]:.1f}/6'
+                ),
+                "Prediction": result["prediction"],
+                "Level": result["level"]
             })
 
-        df_results = pd.DataFrame(
-            table_rows
-        )
+        result_df = pd.DataFrame(table)
 
         st.dataframe(
-            df_results,
+            result_df,
             width="stretch",
             hide_index=True
         )
 
         # ----------------------------------------------------
-        # SUBJECT DETAILS
+        # SUGGESTIONS
         # ----------------------------------------------------
 
         st.subheader(
-            "5. Improvement / Maintenance Suggestions"
+            "5. Improvement / Maintenance"
         )
 
         for subject, result in results.items():
 
             with st.expander(
-                f'{result["symbol"]} {subject} – {result["level"]}'
+                f'{result["symbol"]} {subject}'
             ):
 
-                for recommendation in result["recommendations"]:
+                for item in result["suggestions"]:
 
                     st.write(
-                        "• " + recommendation
+                        "• " + item
                     )
 
         # ----------------------------------------------------
-        # DOWNLOAD PDF
+        # DOWNLOAD REPORT
         # ----------------------------------------------------
 
-        st.divider()
-
         st.subheader(
-            "6. Download Progress Report"
+            "6. Progress Report"
         )
 
-        pdf_file = generate_pdf(
+        html_report = create_progress_report(
             st.session_state.student_name,
             st.session_state.university_id,
             st.session_state.semester,
@@ -1469,20 +1354,19 @@ def student_dashboard():
         )
 
         st.download_button(
-            label="📥 Download Progress Report (PDF)",
-            data=pdf_file,
+            label="📥 Download Progress Report",
+            data=html_report,
             file_name=(
                 f'{st.session_state.university_id}'
-                "_Progress_Report.pdf"
+                '_Progress_Report.html'
             ),
-            mime="application/pdf",
+            mime="text/html",
             width="stretch"
         )
 
-        st.caption(
-            "The report contains student information, "
-            "subject-wise marks, performance indicators, "
-            "ML predictions, clusters and recommendations."
+        st.info(
+            "Open the downloaded HTML report in a browser and "
+            "use Print → Save as PDF if you need a PDF copy."
         )
 
 
@@ -1499,8 +1383,8 @@ def teacher_dashboard():
         model,
         accuracy,
         silhouette,
-        report,
         report_text,
+        report_dict,
         matrix
     ) = train_models()
 
@@ -1508,44 +1392,39 @@ def teacher_dashboard():
         "👨‍🏫 Teacher Dashboard"
     )
 
-    st.caption(
-        "Student Performance Prediction – Model Monitoring"
-    )
-
-    if st.button(
-        "Logout"
-    ):
+    if st.button("Logout"):
 
         st.session_state.clear()
+
         st.rerun()
 
     st.divider()
 
     # --------------------------------------------------------
-    # MODEL PERFORMANCE
+    # MODEL METRICS
     # --------------------------------------------------------
 
     st.subheader(
         "📊 Model Performance"
     )
 
-    col1, col2, col3 = st.columns(3)
+    c1, c2, c3 = st.columns(3)
 
-    with col1:
+    with c1:
 
         st.metric(
             "Random Forest Accuracy",
             f"{accuracy * 100:.2f}%"
         )
 
-    with col2:
+    with c2:
 
         st.metric(
             "K-Means Silhouette Score",
             f"{silhouette:.4f}"
         )
 
-    with col3:
+    with c3:
 
         st.metric(
             "Dataset Records",
@@ -1563,21 +1442,13 @@ def teacher_dashboard():
     )
 
     report_df = pd.DataFrame(
-        report
+        report_dict
     ).transpose()
 
     st.dataframe(
         report_df.round(3),
         width="stretch"
     )
-
-    with st.expander(
-        "View Classification Report Text"
-    ):
-
-        st.code(
-            report_text
-        )
 
     # --------------------------------------------------------
     # CONFUSION MATRIX
@@ -1607,7 +1478,7 @@ def teacher_dashboard():
     # --------------------------------------------------------
 
     st.subheader(
-        "🌳 Random Forest Feature Importance"
+        "🌳 Feature Importance"
     )
 
     importance_df = pd.DataFrame({
@@ -1633,7 +1504,7 @@ def teacher_dashboard():
     )
 
     # --------------------------------------------------------
-    # K-MEANS CLUSTER DISTRIBUTION
+    # K-MEANS
     # --------------------------------------------------------
 
     st.subheader(
@@ -1686,7 +1557,7 @@ def teacher_dashboard():
     # --------------------------------------------------------
 
     st.subheader(
-        "📁 Student Dataset"
+        "📁 Dataset"
     )
 
     st.dataframe(
@@ -1695,72 +1566,24 @@ def teacher_dashboard():
         hide_index=True
     )
 
-    # --------------------------------------------------------
-    # DOWNLOAD DATASET
-    # --------------------------------------------------------
-
-    csv_data = data.to_csv(
+    csv = data.to_csv(
         index=False
     )
 
     st.download_button(
         "📥 Download Dataset",
-        data=csv_data,
+        data=csv,
         file_name="student_performance_dataset.csv",
         mime="text/csv",
         width="stretch"
     )
 
-    # --------------------------------------------------------
-    # MODEL INFORMATION
-    # --------------------------------------------------------
-
-    st.divider()
-
-    st.subheader(
-        "🤖 Machine Learning Information"
-    )
-
-    st.write(
-        """
-        **K-Means Clustering**
-
-        K-Means is an unsupervised machine learning algorithm.
-        It groups students into three clusters based on their
-        academic characteristics.
-
-        **Random Forest Classification**
-
-        Random Forest is a supervised machine learning algorithm.
-        It uses multiple decision trees to predict the student's
-        performance category.
-
-        **Features used:**
-
-        - Attendance
-        - Study Hours
-        - Internal Mark
-        - Assignment Score
-        - Previous Mark
-
-        **Performance classes:**
-
-        - High
-        - Medium
-        - Low
-        """
-    )
-
 
 # ============================================================
-# MAIN APPLICATION
+# MAIN
 # ============================================================
 
 def main():
-
-    # --------------------------------------------------------
-    # INITIAL SESSION STATE
-    # --------------------------------------------------------
 
     if "login_type" not in st.session_state:
 
@@ -1771,7 +1594,7 @@ def main():
         st.session_state.logged_in = False
 
     # --------------------------------------------------------
-    # LOGGED-IN USER
+    # LOGGED IN
     # --------------------------------------------------------
 
     if st.session_state.logged_in:
@@ -1787,12 +1610,12 @@ def main():
         return
 
     # --------------------------------------------------------
-    # LOGIN SELECTION
+    # LOGIN
     # --------------------------------------------------------
 
     if st.session_state.login_type is None:
 
-        login_screen()
+        login_page()
 
     elif st.session_state.login_type == "student":
 
@@ -1804,7 +1627,7 @@ def main():
 
 
 # ============================================================
-# RUN APPLICATION
+# START
 # ============================================================
 
 if __name__ == "__main__":
