@@ -172,6 +172,88 @@ if st.button(
     st.info(
         f"🔵 Student Cluster: {cluster}"
     )
+
+    st.metric(
+        "Model Confidence",
+        f"{confidence:.1f}%"
+    )
+
+    # Student information
+    st.subheader("👨‍🎓 Student Information")
+
+    st.write(f"**Name:** {student_name}")
+    st.write(f"**Student ID:** {student_id}")
+
+    # Academic details
+    st.subheader("📋 Academic Details")
+
+    st.dataframe(
+        student,
+        width="stretch"
+    )
+
+    # Recommendation
+    st.subheader("💡 Recommendation")
+
+    if prediction == "High":
+
+        st.success(
+            "Good academic performance. "
+            "Continue the current study pattern."
+        )
+
+    elif prediction == "Medium":
+
+        st.warning(
+            "Performance is moderate. "
+            "Improving study hours, attendance and "
+            "assignment performance may help."
+        )
+
+    else:
+
+        st.error(
+            "Academic support is recommended. "
+            "Focus on attendance, study hours and assignments."
+        )
+
+# -----------------------------
+# MODEL INFORMATION
+# -----------------------------
+
+st.divider()
+
+st.subheader("📊 Model Performance")
+
+st.write(
+    f"Random Forest Accuracy: **{accuracy * 100:.2f}%**"
+)
+
+st.write(
+    "K-Means Clusters: **3**"
+)
+
+# -----------------------------
+# DATASET
+# -----------------------------
+
+st.divider()
+
+st.subheader("📊 Dataset")
+
+st.write(
+    f"Total Students: **{len(data)}**"
+)
+
+st.dataframe(
+    data.head(20),
+    width="stretch"
+)
+
+st.caption(
+    "Student Performance Prediction using "
+    "K-Means Clustering and Random Forest."
+)
 import pandas as pd
 import joblib
 from sklearn.model_selection import train_test_split
