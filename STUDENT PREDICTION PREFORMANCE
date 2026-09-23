@@ -1,0 +1,632 @@
+import io
+from datetime import datetime
+
+import joblib
+import pandas as pd
+import streamlit as st
+
+from reportlab.lib import colors
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.enums import TA_CENTER
+from reportlab.platypus import (
+    SimpleDocTemplate,
+    Paragraph,
+    Spacer,
+    Table,
+    TableStyle
+)
+
+
+# ============================================================
+# PAGE SETTINGS
+# ============================================================
+
+st.set_page_config(
+    page_title="Student Performance Prediction",
+    page_icon="🎓",
+    layout="wide"
+)
+
+
+# ============================================================
+# MODEL FILES
+# ============================================================
+
+model = joblib.load("models/random_forest_model.pkl")
+kmeans = joblib.load("models/kmeans_model.pkl")
+scaler = joblib.load("models/scaler.pkl")
+
+
+FEATURES = [
+    "Attendance",
+    "Study_Hours",
+    "Internal_Mark",
+    "Assignment",
+    "Previous_Mark"
+]
+
+
+# ============================================================
+# TITLE
+# ============================================================
+
+st.title("🎓 Student Performance Prediction")
+
+st.write(
+    "B.Tech S3 – AI & Data Science | "
+    "K-Means Clustering + Random Forest"
+)
+
+st.divider()
+
+
+# ============================================================
+# STUDENT INFORMATION
+# ============================================================
+
+st.header("👨‍🎓 Student Information")
+
+col1, col2 = st.columns(2)
+
+with col1:
+    student_name = st.text_input(
+        "Student Name",
+        value="Student"
+    )
+
+with col2:
+    student_id = st.text_input(
+        "Student ID",
+        value="S101"
+    )
+
+
+# ============================================================
+# STUDENT DETAILS
+# ============================================================
+
+st.header("📚 Enter Student Details")
+
+col1, col2 = st.columns(2)
+
+with col1:
+
+    attendance = st.slider(
+        "Attendance (%)",
+        min_value=0,
+        max_value=100,
+        value=80
+    )
+
+    study_hours = st.slider(
+        "Study Hours / Day",
+        min_value=0.0,
+        max_value=10.0,
+        value=3.0,
+        step=0.5
+    )
+
+    internal = st.slider(
+        "Internal Mark",
+        min_value=0,
+        max_value=100,
+        value=65
+    )
+
+with col2:
+
+    assignment = st.slider(
+        "Assignment Score",
+        min_value=0,
+        max_value=100,
+        value=70
+    )
+
+    previous = st.slider(
+        "Previous Mark",
+        min_value=0,
+        max_value=100,
+        value=65
+    )
+
+
+# ============================================================
+# CREATE INPUT DATA
+# ============================================================
+
+student_data = pd.DataFrame([{
+    "Attendance": attendance,
+    "Study_Hours": study_hours,
+    "Internal_Mark": internal,
+    "Assignment": assignment,
+    "Previous_Mark": previous
+}])
+
+
+# ============================================================
+# RECOMMENDATIONS
+# ============================================================
+
+def generate_recommendations(
+    attendance,
+    study_hours,
+    internal,
+    assignment,
+    previous,
+    prediction
+):
+
+    recommendations = []
+
+    if attendance < 75:
+        recommendations.append(
+            "Improve attendance and attend classes regularly."
+        )
+
+    if study_hours < 3:
+        recommendations.append(
+            "Increase daily study time and follow a regular study schedule."
+        )
+
+    if internal < 50:
+        recommendations.append(
+            "Focus more on internal examination preparation."
+        )
+
+    if assignment < 60:
+        recommendations.append(
+            "Complete assignments regularly and submit them on time."
+        )
+
+    if previous < 50:
+        recommendations.append(
+            "Revise previous topics and strengthen basic concepts."
+        )
+
+    if prediction == "Low":
+        recommendations.append(
+            "Create an improvement plan with support from a teacher or mentor."
+        )
+
+    elif prediction == "Medium":
+        recommendations.append(
+            "Focus on weaker areas to improve overall academic performance."
+        )
+
+    elif prediction == "High":
+        recommendations.append(
+            "Maintain the current study routine and continue regular revision."
+        )
+
+    if len(recommendations) == 0:
+        recommendations.append(
+            "Maintain your current academic routine and continue regular revision."
+        )
+
+    return recommendations
+
+
+# ============================================================
+# CREATE PDF REPORT
+# ============================================================
+
+def create_progress_report(
+    student_name,
+    student_id,
+    attendance,
+    study_hours,
+    internal,
+    assignment,
+    previous,
+    prediction,
+    cluster,
+    confidence,
+    recommendations
+):
+
+    pdf_buffer = io.BytesIO()
+
+    document = SimpleDocTemplate(
+        pdf_buffer,
+        pagesize=A4,
+        rightMargin=40,
+        leftMargin=40,
+        topMargin=40,
+        bottomMargin=40
+    )
+
+    styles = getSampleStyleSheet()
+
+    title_style = ParagraphStyle(
+        "ReportTitle",
+        parent=styles["Title"],
+        alignment=TA_CENTER,
+        fontSize=20,
+        leading=24,
+        spaceAfter=8
+    )
+
+    subtitle_style = ParagraphStyle(
+        "Subtitle",
+        parent=styles["Normal"],
+        alignment=TA_CENTER,
+        fontSize=10,
+        textColor=colors.grey,
+        spaceAfter=15
+    )
+
+    heading_style = ParagraphStyle(
+        "Heading",
+        parent=styles["Heading2"],
+        fontSize=14,
+        leading=18,
+        spaceBefore=10,
+        spaceAfter=8
+    )
+
+    normal_style = ParagraphStyle(
+        "NormalCustom",
+        parent=styles["BodyText"],
+        fontSize=10,
+        leading=14
+    )
+
+    story = []
+
+    # --------------------------------------------------------
+    # TITLE
+    # --------------------------------------------------------
+
+    story.append(
+        Paragraph(
+            "STUDENT PROGRESS REPORT",
+            title_style
+        )
+    )
+
+    story.append(
+        Paragraph(
+            "Student Performance Analysis and Prediction System",
+            subtitle_style
+        )
+    )
+
+    # --------------------------------------------------------
+    # STUDENT INFORMATION
+    # --------------------------------------------------------
+
+    story.append(
+        Paragraph(
+            "1. Student Information",
+            heading_style
+        )
+    )
+
+    student_table = Table(
+        [
+            ["Student Name", student_name],
+            ["Student ID", student_id],
+            [
+                "Report Date",
+                datetime.now().strftime("%d-%m-%Y")
+            ]
+        ],
+        colWidths=[180, 300]
+    )
+
+    student_table.setStyle(
+        TableStyle([
+            ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
+            ("BACKGROUND", (0, 0), (0, -1), colors.whitesmoke),
+            ("FONTNAME", (0, 0), (0, -1), "Helvetica-Bold"),
+            ("FONTSIZE", (0, 0), (-1, -1), 10),
+            ("PADDING", (0, 0), (-1, -1), 7)
+        ])
+    )
+
+    story.append(student_table)
+
+    # --------------------------------------------------------
+    # PREDICTION
+    # --------------------------------------------------------
+
+    story.append(
+        Paragraph(
+            "2. Prediction Result",
+            heading_style
+        )
+    )
+
+    prediction_table = Table(
+        [
+            ["Predicted Performance", prediction],
+            ["Student Cluster", str(cluster)],
+            ["Model Confidence", f"{confidence:.1f}%"]
+        ],
+        colWidths=[180, 300]
+    )
+
+    prediction_table.setStyle(
+        TableStyle([
+            ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
+            ("BACKGROUND", (0, 0), (0, -1), colors.whitesmoke),
+            ("FONTNAME", (0, 0), (0, -1), "Helvetica-Bold"),
+            ("FONTSIZE", (0, 0), (-1, -1), 10),
+            ("PADDING", (0, 0), (-1, -1), 7)
+        ])
+    )
+
+    story.append(prediction_table)
+
+    # --------------------------------------------------------
+    # ACADEMIC DETAILS
+    # --------------------------------------------------------
+
+    story.append(
+        Paragraph(
+            "3. Academic Performance Details",
+            heading_style
+        )
+    )
+
+    academic_table = Table(
+        [
+            ["Parameter", "Value"],
+            ["Attendance", f"{attendance}%"],
+            ["Study Hours / Day", f"{study_hours}"],
+            ["Internal Mark", f"{internal}/100"],
+            ["Assignment Score", f"{assignment}/100"],
+            ["Previous Mark", f"{previous}/100"]
+        ],
+        colWidths=[280, 200]
+    )
+
+    academic_table.setStyle(
+        TableStyle([
+            ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
+            ("BACKGROUND", (0, 0), (-1, 0), colors.lightgrey),
+            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+            ("FONTSIZE", (0, 0), (-1, -1), 10),
+            ("PADDING", (0, 0), (-1, -1), 7)
+        ])
+    )
+
+    story.append(academic_table)
+
+    # --------------------------------------------------------
+    # RECOMMENDATIONS
+    # --------------------------------------------------------
+
+    story.append(
+        Paragraph(
+            "4. Suggested Improvement Plan",
+            heading_style
+        )
+    )
+
+    for number, recommendation in enumerate(
+        recommendations,
+        start=1
+    ):
+
+        story.append(
+            Paragraph(
+                f"{number}. {recommendation}",
+                normal_style
+            )
+        )
+
+        story.append(Spacer(1, 5))
+
+    # --------------------------------------------------------
+    # NOTE
+    # --------------------------------------------------------
+
+    story.append(Spacer(1, 15))
+
+    story.append(
+        Paragraph(
+            "Note: This report is generated for academic "
+            "demonstration. Machine-learning predictions are "
+            "model outputs and should support, not replace, "
+            "teacher or academic judgment.",
+            ParagraphStyle(
+                "Note",
+                parent=normal_style,
+                fontSize=8,
+                textColor=colors.grey
+            )
+        )
+    )
+
+    document.build(story)
+
+    pdf_buffer.seek(0)
+
+    return pdf_buffer.getvalue()
+
+
+# ============================================================
+# PREDICT BUTTON
+# ============================================================
+
+if st.button(
+    "🔮 Predict Performance",
+    type="primary",
+    width="stretch"
+):
+
+    # Random Forest prediction
+    prediction = model.predict(student_data)[0]
+
+    # Probability / confidence
+    probabilities = model.predict_proba(student_data)[0]
+
+    confidence = float(
+        probabilities.max() * 100
+    )
+
+    # K-Means cluster
+    scaled_student = scaler.transform(student_data)
+
+    cluster = int(
+        kmeans.predict(scaled_student)[0]
+    )
+
+    # Recommendations
+    recommendations = generate_recommendations(
+        attendance,
+        study_hours,
+        internal,
+        assignment,
+        previous,
+        prediction
+    )
+
+    # --------------------------------------------------------
+    # RESULT
+    # --------------------------------------------------------
+
+    st.divider()
+
+    st.header("📊 Prediction Result")
+
+    result_col1, result_col2, result_col3 = st.columns(3)
+
+    with result_col1:
+
+        st.success(
+            f"Predicted Performance: {prediction}"
+        )
+
+    with result_col2:
+
+        st.info(
+            f"Student Cluster: {cluster}"
+        )
+
+    with result_col3:
+
+        st.metric(
+            "Model Confidence",
+            f"{confidence:.1f}%"
+        )
+
+    # --------------------------------------------------------
+    # INPUT SUMMARY
+    # --------------------------------------------------------
+
+    st.subheader("📋 Student Input Summary")
+
+    st.dataframe(
+        student_data,
+        width="stretch",
+        hide_index=True
+    )
+
+    # --------------------------------------------------------
+    # RECOMMENDATIONS
+    # --------------------------------------------------------
+
+    st.subheader("💡 Progress Recommendations")
+
+    for recommendation in recommendations:
+
+        st.write(
+            "• " + recommendation
+        )
+
+    # --------------------------------------------------------
+    # GENERATE PDF
+    # --------------------------------------------------------
+
+    pdf_file = create_progress_report(
+        student_name,
+        student_id,
+        attendance,
+        study_hours,
+        internal,
+        assignment,
+        previous,
+        prediction,
+        cluster,
+        confidence,
+        recommendations
+    )
+
+    # --------------------------------------------------------
+    # DOWNLOAD BUTTON
+    # --------------------------------------------------------
+
+    st.subheader("📄 Progress Report")
+
+    st.success(
+        "Your student progress report is ready!"
+    )
+
+    st.download_button(
+        label="📥 Download Progress Report (PDF)",
+        data=pdf_file,
+        file_name=f"{student_id}_Progress_Report.pdf",
+        mime="application/pdf",
+        width="stretch"
+    )
+
+
+# ============================================================
+# FOOTER
+# ============================================================
+
+st.divider()
+
+st.caption(import pandas as pd
+import joblib
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler
+from sklearn.cluster import KMeans
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.metrics import accuracy_score, classification_report, silhouette_score
+
+DATA = "data/student_performance.csv"
+FEATURES = ["Attendance","Study_Hours","Internal_Mark","Assignment","Previous_Mark"]
+
+df = pd.read_csv(DATA)
+X = df[FEATURES]
+
+# K-Means
+scaler = StandardScaler()
+X_scaled = scaler.fit_transform(X)
+kmeans = KMeans(n_clusters=3, random_state=42, n_init=20)
+df["Cluster"] = kmeans.fit_predict(X_scaled)
+
+print("Silhouette score:", silhouette_score(X_scaled, df["Cluster"]))
+
+# Random Forest
+y = df["Performance"]
+X_train, X_test, y_train, y_test = train_test_split(
+    X, y, test_size=0.20, random_state=42, stratify=y
+)
+
+model = RandomForestClassifier(
+    n_estimators=200, random_state=42, class_weight="balanced"
+)
+model.fit(X_train, y_train)
+y_pred = model.predict(X_test)
+
+print("Accuracy:", accuracy_score(y_test, y_pred))
+print(classification_report(y_test, y_pred))
+
+joblib.dump(model, "models/random_forest_model.pkl")
+joblib.dump(kmeans, "models/kmeans_model.pkl")
+joblib.dump(scaler, "models/scaler.pkl")
+
+    "Student Performance Prediction | "
+    "B.Tech S3 AI & Data Science Project"
+)
+pandas
+numpy
+scikit-learn
+streamlit
+joblib
+matplotlib
