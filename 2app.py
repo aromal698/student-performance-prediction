@@ -1,0 +1,256 @@
+import streamlit as st
+import pandas as pd
+from sklearn.preprocessing import StandardScaler
+from sklearn.cluster import KMeans
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import accuracy_score
+
+st.set_page_config(
+    page_title="Student Performance Prediction",
+    page_icon="🎓",
+    layout="wide"
+)
+
+st.title("🎓 Student Performance Prediction")
+st.write("B.Tech S3 – AI & Data Science")
+st.write("K-Means Clustering + Random Forest Classification")
+
+# Load dataset
+@st.cache_data
+def load_data():
+    return pd.read_csv("data/student_performance.csv")
+
+data = load_data()
+
+FEATURES = [
+    "Attendance",
+    "Study_Hours",
+    "Internal_Mark",
+    "Assignment",
+    "Previous_Mark"
+]
+
+# Check required columns
+required_columns = FEATURES + ["Performance"]
+
+missing = [col for col in required_columns if col not in data.columns]
+
+if missing:
+    st.error(f"Missing columns in CSV: {missing}")
+    st.stop()
+
+# -----------------------------
+# K-MEANS CLUSTERING
+# -----------------------------
+
+scaler = StandardScaler()
+
+X = data[FEATURES]
+X_scaled = scaler.fit_transform(X)
+
+kmeans = KMeans(
+    n_clusters=3,
+    random_state=42,
+    n_init=10
+)
+
+data["Cluster"] = kmeans.fit_predict(X_scaled)
+
+# -----------------------------
+# RANDOM FOREST
+# -----------------------------
+
+y = data["Performance"]
+
+X_train, X_test, y_train, y_test = train_test_split(
+    X,
+    y,
+    test_size=0.20,
+    random_state=42,
+    stratify=y
+)
+
+model = RandomForestClassifier(
+    n_estimators=100,
+    random_state=42
+)
+
+model.fit(X_train, y_train)
+
+y_pred = model.predict(X_test)
+
+accuracy = accuracy_score(y_test, y_pred)
+
+# -----------------------------
+# SIDEBAR
+# -----------------------------
+
+st.sidebar.header("👨‍🎓 Student Details")
+
+student_name = st.sidebar.text_input(
+    "Student Name",
+    "Demo Student"
+)
+
+student_id = st.sidebar.text_input(
+    "Student ID",
+    "S101"
+)
+
+attendance = st.sidebar.slider(
+    "Attendance (%)",
+    0,
+    100,
+    80
+)
+
+study_hours = st.sidebar.slider(
+    "Study Hours / Day",
+    0.0,
+    12.0,
+    3.0
+)
+
+internal = st.sidebar.slider(
+    "Internal Mark",
+    0,
+    100,
+    65
+)
+
+assignment = st.sidebar.slider(
+    "Assignment Score",
+    0,
+    100,
+    70
+)
+
+previous = st.sidebar.slider(
+    "Previous Mark",
+    0,
+    100,
+    65
+)
+
+# -----------------------------
+# PREDICTION
+# -----------------------------
+
+if st.button(
+    "🔮 Predict Performance",
+    type="primary"
+):
+
+    student = pd.DataFrame([{
+        "Attendance": attendance,
+        "Study_Hours": study_hours,
+        "Internal_Mark": internal,
+        "Assignment": assignment,
+        "Previous_Mark": previous
+    }])
+
+    # Random Forest prediction
+    prediction = model.predict(student)[0]
+
+    probabilities = model.predict_proba(student)[0]
+
+    confidence = probabilities.max() * 100
+
+    # K-Means cluster
+    student_scaled = scaler.transform(student)
+
+    cluster = int(
+        kmeans.predict(student_scaled)[0]
+    )
+
+    # Results
+    st.success(
+        f"🎓 Predicted Performance: {prediction}"
+    )
+
+    st.info(
+        f"🔵 Student Cluster: {cluster}"
+    )
+
+    st.metric(
+        "Model Confidence",
+        f"{confidence:.1f}%"
+    )
+
+    # Student information
+    st.subheader("👨‍🎓 Student Information")
+
+    st.write(f"**Name:** {student_name}")
+    st.write(f"**Student ID:** {student_id}")
+
+    # Academic details
+    st.subheader("📋 Academic Details")
+
+    st.dataframe(
+        student,
+        width="stretch"
+    )
+
+    # Recommendation
+    st.subheader("💡 Recommendation")
+
+    if prediction == "High":
+
+        st.success(
+            "Good academic performance. "
+            "Continue the current study pattern."
+        )
+
+    elif prediction == "Medium":
+
+        st.warning(
+            "Performance is moderate. "
+            "Improving study hours, attendance and "
+            "assignment performance may help."
+        )
+
+    else:
+
+        st.error(
+            "Academic support is recommended. "
+            "Focus on attendance, study hours and assignments."
+        )
+
+# -----------------------------
+# MODEL INFORMATION
+# -----------------------------
+
+st.divider()
+
+st.subheader("📊 Model Performance")
+
+st.write(
+    f"Random Forest Accuracy: **{accuracy * 100:.2f}%**"
+)
+
+st.write(
+    "K-Means Clusters: **3**"
+)
+
+# -----------------------------
+# DATASET
+# -----------------------------
+
+st.divider()
+
+st.subheader("📊 Dataset")
+
+st.write(
+    f"Total Students: **{len(data)}**"
+)
+
+st.dataframe(
+    data.head(20),
+    width="stretch"
+)
+
+st.caption(
+    "Student Performance Prediction using "
+    "K-Means Clustering and Random Forest."
+)
