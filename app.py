@@ -9,7 +9,7 @@ from sklearn.metrics import accuracy_score, classification_report
 
 
 # =========================================================
-# PAGE CONFIG
+# PAGE CONFIGURATION
 # =========================================================
 
 st.set_page_config(
@@ -17,6 +17,13 @@ st.set_page_config(
     page_icon="🎓",
     layout="wide"
 )
+
+
+# =========================================================
+# MAIN TITLE
+# =========================================================
+
+st.title("🎓 Student Performance Prediction")
 
 
 # =========================================================
@@ -30,10 +37,11 @@ def load_data():
 
 try:
     data = load_data()
+
 except FileNotFoundError:
     st.error(
-        "Dataset not found!\n\n"
-        "Make sure this file exists:\n"
+        "Dataset not found.\n\n"
+        "Please make sure the following file exists:\n"
         "data/student_performance.csv"
     )
     st.stop()
@@ -53,18 +61,28 @@ FEATURES = [
 
 REQUIRED_COLUMNS = FEATURES + ["Performance"]
 
-missing = [
-    col for col in REQUIRED_COLUMNS
-    if col not in data.columns
+
+# =========================================================
+# CHECK DATASET
+# =========================================================
+
+missing_columns = [
+    column
+    for column in REQUIRED_COLUMNS
+    if column not in data.columns
 ]
 
-if missing:
-    st.error(f"Missing dataset columns: {missing}")
+if missing_columns:
+
+    st.error(
+        f"Missing columns in dataset: {missing_columns}"
+    )
+
     st.stop()
 
 
 # =========================================================
-# K-MEANS
+# K-MEANS CLUSTERING
 # =========================================================
 
 X = data[FEATURES]
@@ -73,20 +91,24 @@ scaler = StandardScaler()
 
 X_scaled = scaler.fit_transform(X)
 
+
 kmeans = KMeans(
     n_clusters=3,
     random_state=42,
     n_init=10
 )
 
-data["Cluster"] = kmeans.fit_predict(X_scaled)
+data["Cluster"] = kmeans.fit_predict(
+    X_scaled
+)
 
 
 # =========================================================
-# RANDOM FOREST
+# RANDOM FOREST CLASSIFICATION
 # =========================================================
 
 y = data["Performance"]
+
 
 X_train, X_test, y_train, y_test = train_test_split(
     X,
@@ -96,36 +118,49 @@ X_train, X_test, y_train, y_test = train_test_split(
     stratify=y
 )
 
+
 model = RandomForestClassifier(
     n_estimators=100,
     random_state=42
 )
 
-model.fit(X_train, y_train)
-
-y_pred = model.predict(X_test)
-
-accuracy = accuracy_score(y_test, y_pred)
-
-
-# =========================================================
-# MAIN TITLE
-# =========================================================
-
-st.title("🎓 Student Performance Prediction")
+model.fit(
+    X_train,
+    y_train
+)
 
 
 # =========================================================
-# LOGIN TYPE
+# MODEL EVALUATION
+# =========================================================
+
+y_pred = model.predict(
+    X_test
+)
+
+
+accuracy = accuracy_score(
+    y_test,
+    y_pred
+)
+
+
+# =========================================================
+# SESSION STATE
 # =========================================================
 
 if "login_type" not in st.session_state:
+
     st.session_state.login_type = None
 
+
 if "student_logged_in" not in st.session_state:
+
     st.session_state.student_logged_in = False
 
+
 if "teacher_logged_in" not in st.session_state:
+
     st.session_state.teacher_logged_in = False
 
 
@@ -135,16 +170,18 @@ if "teacher_logged_in" not in st.session_state:
 
 if (
     not st.session_state.student_logged_in
-    and not st.session_state.teacher_logged_in
+    and
+    not st.session_state.teacher_logged_in
 ):
 
     st.subheader("Choose Login")
 
     col1, col2 = st.columns(2)
 
-    # -----------------------------------------------------
-    # STUDENT BUTTON
-    # -----------------------------------------------------
+
+    # =====================================================
+    # STUDENT OPTION
+    # =====================================================
 
     with col1:
 
@@ -152,12 +189,15 @@ if (
             "🎓 Student",
             width="stretch"
         ):
+
             st.session_state.login_type = "student"
 
+            st.rerun()
 
-    # -----------------------------------------------------
-    # TEACHER BUTTON
-    # -----------------------------------------------------
+
+    # =====================================================
+    # TEACHER OPTION
+    # =====================================================
 
     with col2:
 
@@ -165,7 +205,10 @@ if (
             "👨‍🏫 Teacher",
             width="stretch"
         ):
+
             st.session_state.login_type = "teacher"
+
+            st.rerun()
 
 
     # =====================================================
@@ -179,9 +222,10 @@ if (
         st.header("🔐 Student Login")
 
         st.info(
-            "Password format: BTECH + 4-digit DOB year\n\n"
-            "Example: BTECH2003"
+            "Student password must contain BTECH "
+            "followed by a 4-digit DOB year."
         )
+
 
         student_password = st.text_input(
             "Student Password",
@@ -190,15 +234,29 @@ if (
             placeholder="BTECH2003"
         )
 
+
         if st.button(
             "🔓 Student Login",
             type="primary",
             width="stretch"
         ):
 
-            password = student_password.strip().upper()
+            password = (
+                student_password
+                .strip()
+                .upper()
+            )
 
-            # EXACTLY 9 CHARACTERS
+
+            # -------------------------------------------------
+            # STUDENT PASSWORD VALIDATION
+            #
+            # Exactly 9 characters
+            # First 5 characters = BTECH
+            # Last 4 characters = year
+            # Year = 2000 to 2020
+            # -------------------------------------------------
+
             valid_password = (
                 len(password) == 9
                 and password[:5] == "BTECH"
@@ -206,23 +264,27 @@ if (
                 and 2000 <= int(password[5:]) <= 2020
             )
 
+
             if valid_password:
 
                 st.session_state.student_logged_in = True
 
                 st.session_state.dob_year = password[5:]
 
+                st.session_state.login_type = None
+
                 st.rerun()
+
 
             else:
 
                 st.error(
-                    "❌ Invalid password."
+                    "❌ Invalid student password."
                 )
 
                 st.warning(
-                    "Password must be exactly 9 characters: "
-                    "BTECH + 4-digit DOB year."
+                    "Password must be exactly 9 characters "
+                    "and follow the required format."
                 )
 
 
@@ -236,12 +298,14 @@ if (
 
         st.header("🔐 Teacher Login")
 
+
+        # No password example is displayed here.
+
         teacher_password = st.text_input(
             "Teacher Password",
-            type="password",
-            max_chars=8,
-            placeholder="*ktutech"
+            type="password"
         )
+
 
         if st.button(
             "🔓 Teacher Login",
@@ -249,11 +313,15 @@ if (
             width="stretch"
         ):
 
+
             if teacher_password == "*ktutech":
 
                 st.session_state.teacher_logged_in = True
 
+                st.session_state.login_type = None
+
                 st.rerun()
+
 
             else:
 
@@ -273,16 +341,20 @@ if st.session_state.student_logged_in:
 
     st.header("🎓 Student Dashboard")
 
-    st.success("Student Login Successful")
+    st.success(
+        "Student Login Successful"
+    )
 
 
-    # -----------------------------------------------------
+    # =====================================================
     # STUDENT INFORMATION
-    # -----------------------------------------------------
+    # =====================================================
 
     st.subheader("👤 Student Information")
 
+
     col1, col2 = st.columns(2)
+
 
     with col1:
 
@@ -299,6 +371,7 @@ if st.session_state.student_logged_in:
                 "S8"
             ]
         )
+
 
     with col2:
 
@@ -319,41 +392,54 @@ if st.session_state.student_logged_in:
     st.divider()
 
 
-    # -----------------------------------------------------
-    # SUBJECT NAMES
-    # -----------------------------------------------------
+    # =====================================================
+    # SIX SUBJECTS
+    # =====================================================
 
     st.subheader("📚 Six Subjects")
 
+    st.write(
+        "Enter the names of your six subjects."
+    )
+
+
     subject_names = []
 
-    columns = st.columns(3)
+
+    subject_columns = st.columns(3)
+
 
     for i in range(6):
 
-        with columns[i % 3]:
+        with subject_columns[i % 3]:
 
             subject = st.text_input(
                 f"Subject {i + 1}",
                 placeholder=f"Enter Subject {i + 1}",
-                key=f"subject_{i}"
+                key=f"subject_name_{i}"
             )
 
-            subject_names.append(subject)
+            subject_names.append(
+                subject
+            )
 
 
     st.divider()
 
 
-    # -----------------------------------------------------
-    # SUBJECT INPUTS
-    # -----------------------------------------------------
+    # =====================================================
+    # ACADEMIC INFORMATION
+    # =====================================================
 
-    st.subheader("📊 Academic Information")
+    st.subheader(
+        "📊 Academic Information"
+    )
 
     st.write(
-        "Enter academic information separately for each subject."
+        "Enter academic information separately "
+        "for each subject."
     )
+
 
     subject_inputs = []
 
@@ -362,7 +448,9 @@ if st.session_state.student_logged_in:
 
         subject = subject_names[i].strip()
 
+
         if subject == "":
+
             subject = f"Subject {i + 1}"
 
 
@@ -373,6 +461,10 @@ if st.session_state.student_logged_in:
 
         col1, col2, col3 = st.columns(3)
 
+
+        # -------------------------------------------------
+        # COLUMN 1
+        # -------------------------------------------------
 
         with col1:
 
@@ -385,15 +477,20 @@ if st.session_state.student_logged_in:
                 key=f"attendance_{i}"
             )
 
+
             study_hours = st.number_input(
                 "Study Hours / Day",
                 min_value=0.0,
                 max_value=24.0,
                 value=3.0,
                 step=0.5,
-                key=f"study_{i}"
+                key=f"study_hours_{i}"
             )
 
+
+        # -------------------------------------------------
+        # COLUMN 2
+        # -------------------------------------------------
 
         with col2:
 
@@ -403,18 +500,23 @@ if st.session_state.student_logged_in:
                 max_value=100.0,
                 value=65.0,
                 step=1.0,
-                key=f"internal_{i}"
+                key=f"internal_mark_{i}"
             )
 
-            assignment = st.number_input(
+
+            assignment_score = st.number_input(
                 "Assignment Score",
                 min_value=0.0,
                 max_value=100.0,
                 value=70.0,
                 step=1.0,
-                key=f"assignment_{i}"
+                key=f"assignment_score_{i}"
             )
 
+
+        # -------------------------------------------------
+        # COLUMN 3
+        # -------------------------------------------------
 
         with col3:
 
@@ -424,7 +526,7 @@ if st.session_state.student_logged_in:
                 max_value=100.0,
                 value=65.0,
                 step=1.0,
-                key=f"previous_{i}"
+                key=f"previous_mark_{i}"
             )
 
 
@@ -434,7 +536,7 @@ if st.session_state.student_logged_in:
                 "Attendance": attendance,
                 "Study_Hours": study_hours,
                 "Internal_Mark": internal_mark,
-                "Assignment": assignment,
+                "Assignment": assignment_score,
                 "Previous_Mark": previous_mark
             }
         )
@@ -443,9 +545,9 @@ if st.session_state.student_logged_in:
         st.divider()
 
 
-    # -----------------------------------------------------
-    # PREDICT
-    # -----------------------------------------------------
+    # =====================================================
+    # PREDICTION
+    # =====================================================
 
     if st.button(
         "🔮 Predict Performance",
@@ -453,51 +555,64 @@ if st.session_state.student_logged_in:
         width="stretch"
     ):
 
+
         results = []
 
 
+        # -------------------------------------------------
+        # PREDICT EACH SUBJECT
+        # -------------------------------------------------
+
         for subject_data in subject_inputs:
 
+
             input_data = pd.DataFrame(
-                [{
-                    "Attendance":
-                        subject_data["Attendance"],
+                [
+                    {
+                        "Attendance":
+                            subject_data["Attendance"],
 
-                    "Study_Hours":
-                        subject_data["Study_Hours"],
+                        "Study_Hours":
+                            subject_data["Study_Hours"],
 
-                    "Internal_Mark":
-                        subject_data["Internal_Mark"],
+                        "Internal_Mark":
+                            subject_data["Internal_Mark"],
 
-                    "Assignment":
-                        subject_data["Assignment"],
+                        "Assignment":
+                            subject_data["Assignment"],
 
-                    "Previous_Mark":
-                        subject_data["Previous_Mark"]
-                }]
+                        "Previous_Mark":
+                            subject_data["Previous_Mark"]
+                    }
+                ]
             )
 
 
-            # RANDOM FOREST
+            # RANDOM FOREST PREDICTION
+
             prediction = model.predict(
                 input_data
             )[0]
 
 
             # CONFIDENCE
+
             probabilities = model.predict_proba(
                 input_data
             )[0]
+
 
             confidence = (
                 probabilities.max() * 100
             )
 
 
-            # K-MEANS
+            # K-MEANS CLUSTER
+
             scaled_input = scaler.transform(
                 input_data
             )
+
 
             cluster = int(
                 kmeans.predict(
@@ -515,7 +630,10 @@ if st.session_state.student_logged_in:
                         prediction,
 
                     "Confidence (%)":
-                        round(confidence, 1),
+                        round(
+                            confidence,
+                            1
+                        ),
 
                     "Cluster":
                         cluster
@@ -523,21 +641,28 @@ if st.session_state.student_logged_in:
             )
 
 
-        results_df = pd.DataFrame(results)
+        # =================================================
+        # RESULTS DATAFRAME
+        # =================================================
 
-
-        st.success(
-            "✅ Prediction completed!"
+        results_df = pd.DataFrame(
+            results
         )
 
 
-        # -------------------------------------------------
-        # RESULTS TABLE
-        # -------------------------------------------------
+        st.success(
+            "✅ Prediction completed successfully!"
+        )
+
+
+        # =================================================
+        # SUBJECT-WISE TABLE
+        # =================================================
 
         st.subheader(
             "📊 Subject-wise Prediction"
         )
+
 
         st.dataframe(
             results_df,
@@ -546,9 +671,9 @@ if st.session_state.student_logged_in:
         )
 
 
-        # -------------------------------------------------
+        # =================================================
         # INDIVIDUAL RESULTS
-        # -------------------------------------------------
+        # =================================================
 
         st.subheader(
             "📚 Subject Results"
@@ -556,6 +681,7 @@ if st.session_state.student_logged_in:
 
 
         for result in results:
+
 
             subject = result["Subject"]
 
@@ -572,6 +698,7 @@ if st.session_state.student_logged_in:
                     f"{confidence}% confidence"
                 )
 
+
             elif prediction == "Medium":
 
                 st.warning(
@@ -579,6 +706,7 @@ if st.session_state.student_logged_in:
                     f"Medium Performance | "
                     f"{confidence}% confidence"
                 )
+
 
             else:
 
@@ -589,15 +717,19 @@ if st.session_state.student_logged_in:
                 )
 
 
-        # -------------------------------------------------
+        # =================================================
         # RECOMMENDATION
-        # -------------------------------------------------
+        # =================================================
 
-        st.subheader("💡 Recommendation")
+        st.subheader(
+            "💡 Recommendation"
+        )
+
 
         low_subjects = results_df[
             results_df["Prediction"] == "Low"
         ]["Subject"].tolist()
+
 
         medium_subjects = results_df[
             results_df["Prediction"] == "Medium"
@@ -608,15 +740,21 @@ if st.session_state.student_logged_in:
 
             st.error(
                 "Focus more on: "
-                + ", ".join(low_subjects)
+                + ", ".join(
+                    low_subjects
+                )
             )
+
 
         elif medium_subjects:
 
             st.warning(
                 "Consider improving: "
-                + ", ".join(medium_subjects)
+                + ", ".join(
+                    medium_subjects
+                )
             )
+
 
         else:
 
@@ -626,11 +764,12 @@ if st.session_state.student_logged_in:
             )
 
 
-    # -----------------------------------------------------
+    # =====================================================
     # STUDENT LOGOUT
-    # -----------------------------------------------------
+    # =====================================================
 
     st.divider()
+
 
     if st.button(
         "🚪 Student Logout",
@@ -638,7 +777,13 @@ if st.session_state.student_logged_in:
     ):
 
         st.session_state.student_logged_in = False
+
         st.session_state.login_type = None
+
+        if "dob_year" in st.session_state:
+
+            del st.session_state["dob_year"]
+
 
         st.rerun()
 
@@ -654,36 +799,49 @@ if st.session_state.teacher_logged_in:
 
     st.header("👨‍🏫 Teacher Dashboard")
 
-    st.success("Teacher Login Successful")
+    st.success(
+        "Teacher Login Successful"
+    )
 
 
-    # -----------------------------------------------------
+    # =====================================================
     # DATASET OVERVIEW
-    # -----------------------------------------------------
+    # =====================================================
 
-    st.subheader("📊 Dataset Overview")
+    st.subheader(
+        "📊 Dataset Overview"
+    )
+
 
     col1, col2, col3, col4 = st.columns(4)
 
+
     with col1:
+
         st.metric(
             "Total Students",
             len(data)
         )
 
+
     with col2:
+
         st.metric(
             "Features",
             len(FEATURES)
         )
 
+
     with col3:
+
         st.metric(
             "Model Accuracy",
             f"{accuracy * 100:.2f}%"
         )
 
+
     with col4:
+
         st.metric(
             "Clusters",
             3
@@ -693,11 +851,14 @@ if st.session_state.teacher_logged_in:
     st.divider()
 
 
-    # -----------------------------------------------------
+    # =====================================================
     # DATASET
-    # -----------------------------------------------------
+    # =====================================================
 
-    st.subheader("📁 Student Dataset")
+    st.subheader(
+        "📁 Student Dataset"
+    )
+
 
     st.dataframe(
         data,
@@ -709,37 +870,44 @@ if st.session_state.teacher_logged_in:
     st.divider()
 
 
-    # -----------------------------------------------------
+    # =====================================================
     # PERFORMANCE DISTRIBUTION
-    # -----------------------------------------------------
+    # =====================================================
 
     st.subheader(
         "📈 Performance Distribution"
     )
+
 
     performance_counts = (
         data["Performance"]
         .value_counts()
     )
 
+
     st.bar_chart(
         performance_counts
     )
 
 
-    # -----------------------------------------------------
-    # CLUSTER DISTRIBUTION
-    # -----------------------------------------------------
+    st.divider()
+
+
+    # =====================================================
+    # K-MEANS CLUSTER DISTRIBUTION
+    # =====================================================
 
     st.subheader(
         "🔵 K-Means Cluster Distribution"
     )
+
 
     cluster_counts = (
         data["Cluster"]
         .value_counts()
         .sort_index()
     )
+
 
     st.bar_chart(
         cluster_counts
@@ -749,13 +917,14 @@ if st.session_state.teacher_logged_in:
     st.divider()
 
 
-    # -----------------------------------------------------
-    # MODEL ACCURACY
-    # -----------------------------------------------------
+    # =====================================================
+    # RANDOM FOREST MODEL
+    # =====================================================
 
     st.subheader(
         "🤖 Random Forest Model"
     )
+
 
     st.write(
         f"**Model Accuracy:** "
@@ -763,13 +932,14 @@ if st.session_state.teacher_logged_in:
     )
 
 
-    # -----------------------------------------------------
+    # =====================================================
     # CLASSIFICATION REPORT
-    # -----------------------------------------------------
+    # =====================================================
 
     st.subheader(
         "📋 Classification Report"
     )
+
 
     report = classification_report(
         y_test,
@@ -777,9 +947,11 @@ if st.session_state.teacher_logged_in:
         output_dict=True
     )
 
+
     report_df = pd.DataFrame(
         report
     ).transpose()
+
 
     st.dataframe(
         report_df.round(2),
@@ -787,35 +959,43 @@ if st.session_state.teacher_logged_in:
     )
 
 
-    # -----------------------------------------------------
+    st.divider()
+
+
+    # =====================================================
     # FEATURE IMPORTANCE
-    # -----------------------------------------------------
+    # =====================================================
 
     st.subheader(
         "📌 Feature Importance"
     )
 
+
     importance_df = pd.DataFrame(
         {
             "Feature": FEATURES,
-            "Importance": model.feature_importances_
+            "Importance":
+                model.feature_importances_
         }
     ).sort_values(
         "Importance",
         ascending=False
     )
 
+
     st.bar_chart(
-        importance_df.set_index("Feature")
+        importance_df.set_index(
+            "Feature"
+        )
     )
 
 
     st.divider()
 
 
-    # -----------------------------------------------------
+    # =====================================================
     # TEACHER LOGOUT
-    # -----------------------------------------------------
+    # =====================================================
 
     if st.button(
         "🚪 Teacher Logout",
@@ -823,6 +1003,7 @@ if st.session_state.teacher_logged_in:
     ):
 
         st.session_state.teacher_logged_in = False
+
         st.session_state.login_type = None
 
         st.rerun()
