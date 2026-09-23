@@ -414,3 +414,9 @@ st.divider()
 st.caption(
     "Student Performance Prediction System"
 )
+if (
+    len(password_clean) == 9
+    and password_clean[:5] == "BTECH"
+    and password_clean[5:].isdigit()
+    and 2000 <= int(password_clean[5:]) <= 2020
+):
