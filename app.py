@@ -1,5 +1,6 @@
 import os
 import html
+import io
 import pandas as pd
 import numpy as np
 import streamlit as st
@@ -10,9 +11,23 @@ from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score, silhouette_score
 
+# PDF
+from reportlab.lib import colors
+from reportlab.lib.pagesizes import A4, landscape
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.enums import TA_CENTER
+from reportlab.platypus import (
+    SimpleDocTemplate,
+    Paragraph,
+    Spacer,
+    Table,
+    TableStyle,
+    PageBreak
+)
+
 
 # =========================================================
-# PAGE CONFIGURATION
+# PAGE CONFIG
 # =========================================================
 
 st.set_page_config(
@@ -23,113 +38,541 @@ st.set_page_config(
 
 
 # =========================================================
-# BRANCHES AND SUBJECTS
+# BRANCHES
 # =========================================================
 
-BRANCH_SUBJECTS = {
-    "Artificial Intelligence and Data Science": [
-        "Mathematics",
-        "Data Structures",
-        "Database Management System",
-        "Artificial Intelligence",
-        "Machine Learning",
-        "Data Science"
-    ],
+BRANCHES = [
+    "Artificial Intelligence and Data Science",
+    "Computer Science and Engineering",
+    "Computer Science and Engineering (AI)",
+    "Computer Science and Engineering (Data Science)",
+    "Information Technology",
+    "Cyber Security",
+    "Electronics and Communication Engineering",
+    "Electrical and Electronics Engineering",
+    "Electronics and Instrumentation Engineering",
+    "Mechanical Engineering",
+    "Civil Engineering"
+]
 
-    "Computer Science and Engineering": [
-        "Mathematics",
-        "Data Structures",
-        "Database Management System",
-        "Operating Systems",
-        "Computer Networks",
-        "Object Oriented Programming"
-    ],
 
-    "Computer Science and Engineering (AI)": [
-        "Mathematics",
-        "Data Structures",
-        "Database Management System",
-        "Artificial Intelligence",
-        "Machine Learning",
-        "Computer Networks"
-    ],
+# =========================================================
+# SUBJECT DATABASE
+#
+# This is a project catalogue.
+# Update names to exactly match your college's KTU scheme
+# if necessary.
+# =========================================================
 
-    "Computer Science and Engineering (Data Science)": [
-        "Mathematics",
-        "Data Structures",
-        "Database Management System",
-        "Data Analytics",
-        "Machine Learning",
-        "Statistics"
-    ],
+SUBJECTS = {
 
-    "Information Technology": [
-        "Mathematics",
-        "Data Structures",
-        "Database Management System",
-        "Computer Networks",
-        "Web Technology",
-        "Operating Systems"
-    ],
+    # =====================================================
+    # AI & DATA SCIENCE
+    # =====================================================
 
-    "Cyber Security": [
-        "Mathematics",
-        "Data Structures",
-        "Database Management System",
-        "Cyber Security",
-        "Computer Networks",
-        "Cryptography"
-    ],
+    "Artificial Intelligence and Data Science": {
 
-    "Electronics and Communication Engineering": [
-        "Mathematics",
-        "Electronic Devices",
-        "Digital Electronics",
-        "Signals and Systems",
-        "Communication Engineering",
-        "Microprocessors"
-    ],
+        "S1": [
+            "Mathematics for Information Science I",
+            "Physics for Information Science",
+            "Engineering Graphics",
+            "Introduction to Computing",
+            "Life Skills",
+            "Programming in C",
+            "Engineering Chemistry",
+            "Basics of Electrical Engineering",
+            "Basics of Electronics Engineering",
+            "Engineering Workshop",
+            "Health and Wellness",
+            "Professional Communication"
+        ],
 
-    "Electrical and Electronics Engineering": [
-        "Mathematics",
-        "Circuit Theory",
-        "Digital Electronics",
-        "Electrical Machines",
-        "Power Systems",
-        "Control Systems"
-    ],
+        "S2": [
+            "Mathematics for Information Science II",
+            "Data Structures",
+            "Object Oriented Programming",
+            "Digital Electronics",
+            "Engineering Mechanics",
+            "Professional Communication",
+            "Database Fundamentals",
+            "Environmental Science",
+            "Discrete Mathematics",
+            "Computer Organization",
+            "Python Programming",
+            "Design Thinking"
+        ],
 
-    "Electronics and Instrumentation Engineering": [
-        "Mathematics",
-        "Electronic Devices",
-        "Measurements",
-        "Control Systems",
-        "Digital Electronics",
-        "Instrumentation"
-    ],
+        "S3": [
+            "Mathematics for Information Science III",
+            "Data Structures and Algorithms",
+            "Database Management Systems",
+            "Artificial Intelligence",
+            "Machine Learning",
+            "Digital Signal Processing",
+            "Computer Organization and Architecture",
+            "Probability and Statistics",
+            "Operating Systems",
+            "Object Oriented Programming",
+            "Data Analytics",
+            "Professional Ethics"
+        ],
 
-    "Mechanical Engineering": [
-        "Mathematics",
-        "Engineering Mechanics",
-        "Thermodynamics",
-        "Fluid Mechanics",
-        "Manufacturing Process",
-        "Machine Design"
-    ],
+        "S4": [
+            "Operating Systems",
+            "Computer Networks",
+            "Machine Learning",
+            "Data Mining",
+            "Web Programming",
+            "Probability and Statistics",
+            "Design and Analysis of Algorithms",
+            "Software Engineering",
+            "Artificial Neural Networks",
+            "Database Systems",
+            "Research Methodology",
+            "Constitution of India"
+        ],
 
-    "Civil Engineering": [
-        "Mathematics",
-        "Engineering Mechanics",
-        "Surveying",
-        "Strength of Materials",
-        "Fluid Mechanics",
-        "Construction Technology"
-    ]
+        "S5": [
+            "Deep Learning",
+            "Big Data Analytics",
+            "Data Visualization",
+            "Natural Language Processing",
+            "Cloud Computing",
+            "Computer Vision",
+            "Artificial Intelligence Laboratory",
+            "Machine Learning Laboratory",
+            "Data Science Laboratory",
+            "Professional Elective I",
+            "Open Elective I",
+            "Entrepreneurship"
+        ],
+
+        "S6": [
+            "Reinforcement Learning",
+            "Big Data Technologies",
+            "Cloud Computing",
+            "Computer Vision",
+            "Natural Language Processing",
+            "Data Engineering",
+            "AI Laboratory",
+            "Data Analytics Laboratory",
+            "Professional Elective II",
+            "Professional Elective III",
+            "Open Elective II",
+            "Mini Project"
+        ],
+
+        "S7": [
+            "Advanced Machine Learning",
+            "Generative AI",
+            "MLOps",
+            "Advanced Data Analytics",
+            "Distributed Computing",
+            "Cyber Security",
+            "Project Phase I",
+            "Professional Elective IV",
+            "Professional Elective V",
+            "Open Elective III",
+            "Seminar",
+            "Industrial Training"
+        ],
+
+        "S8": [
+            "Project Phase II",
+            "Major Project",
+            "Professional Elective VI",
+            "Professional Elective VII",
+            "Open Elective IV",
+            "Artificial Intelligence Applications",
+            "Data Science Applications",
+            "Industry Internship",
+            "Technical Seminar",
+            "Comprehensive Viva"
+        ]
+    },
+
+
+    # =====================================================
+    # CSE
+    # =====================================================
+
+    "Computer Science and Engineering": {
+
+        "S1": [
+            "Mathematics I",
+            "Physics",
+            "Engineering Graphics",
+            "Programming in C",
+            "Life Skills",
+            "Engineering Chemistry",
+            "Electrical Engineering",
+            "Electronics Engineering",
+            "Engineering Workshop",
+            "Professional Communication",
+            "Computer Fundamentals",
+            "Health and Wellness"
+        ],
+
+        "S2": [
+            "Mathematics II",
+            "Data Structures",
+            "Object Oriented Programming",
+            "Digital Electronics",
+            "Engineering Mechanics",
+            "Database Fundamentals",
+            "Discrete Mathematics",
+            "Computer Organization",
+            "Python Programming",
+            "Environmental Science",
+            "Communication Skills",
+            "Design Thinking"
+        ],
+
+        "S3": [
+            "Mathematics III",
+            "Data Structures and Algorithms",
+            "Database Management Systems",
+            "Object Oriented Programming",
+            "Digital Logic",
+            "Computer Organization",
+            "Operating Systems",
+            "Probability and Statistics",
+            "Software Engineering",
+            "Artificial Intelligence",
+            "Computer Architecture",
+            "Professional Ethics"
+        ],
+
+        "S4": [
+            "Operating Systems",
+            "Computer Networks",
+            "Design and Analysis of Algorithms",
+            "Microprocessors",
+            "Database Systems",
+            "Software Engineering",
+            "Web Programming",
+            "Theory of Computation",
+            "Artificial Intelligence",
+            "Computer Graphics",
+            "Probability and Statistics",
+            "Constitution of India"
+        ],
+
+        "S5": [
+            "Compiler Design",
+            "Computer Networks",
+            "Distributed Systems",
+            "Cloud Computing",
+            "Machine Learning",
+            "Web Technologies",
+            "Cyber Security",
+            "Software Testing",
+            "Professional Elective I",
+            "Professional Elective II",
+            "Open Elective I",
+            "Mini Project"
+        ],
+
+        "S6": [
+            "Machine Learning",
+            "Cloud Computing",
+            "Computer Security",
+            "Distributed Computing",
+            "Mobile Computing",
+            "Internet of Things",
+            "Data Mining",
+            "Professional Elective III",
+            "Professional Elective IV",
+            "Open Elective II",
+            "Seminar",
+            "Mini Project"
+        ],
+
+        "S7": [
+            "Deep Learning",
+            "Blockchain",
+            "Natural Language Processing",
+            "Advanced Computer Networks",
+            "Cyber Security",
+            "MLOps",
+            "Project Phase I",
+            "Professional Elective V",
+            "Professional Elective VI",
+            "Open Elective III",
+            "Seminar",
+            "Industrial Training"
+        ],
+
+        "S8": [
+            "Major Project",
+            "Project Phase II",
+            "Professional Elective VII",
+            "Professional Elective VIII",
+            "Open Elective IV",
+            "Advanced AI",
+            "Cloud Applications",
+            "Industry Internship",
+            "Technical Seminar",
+            "Comprehensive Viva"
+        ]
+    },
+
+
+    # =====================================================
+    # CSE AI
+    # =====================================================
+
+    "Computer Science and Engineering (AI)": {
+
+        "S1": [
+            "Mathematics I",
+            "Physics",
+            "Engineering Graphics",
+            "Programming in C",
+            "Engineering Chemistry",
+            "Life Skills",
+            "Electrical Engineering",
+            "Electronics Engineering",
+            "Engineering Workshop",
+            "Professional Communication"
+        ],
+
+        "S2": [
+            "Mathematics II",
+            "Data Structures",
+            "Object Oriented Programming",
+            "Digital Electronics",
+            "Discrete Mathematics",
+            "Database Fundamentals",
+            "Computer Organization",
+            "Python Programming",
+            "Engineering Mechanics",
+            "Environmental Science"
+        ],
+
+        "S3": [
+            "Mathematics III",
+            "Data Structures and Algorithms",
+            "Database Management Systems",
+            "Artificial Intelligence",
+            "Machine Learning",
+            "Computer Organization",
+            "Probability and Statistics",
+            "Operating Systems",
+            "Object Oriented Programming",
+            "Data Analytics"
+        ],
+
+        "S4": [
+            "Machine Learning",
+            "Artificial Intelligence",
+            "Computer Networks",
+            "Operating Systems",
+            "Design and Analysis of Algorithms",
+            "Database Systems",
+            "Web Programming",
+            "Computer Vision",
+            "Natural Language Processing",
+            "Software Engineering"
+        ],
+
+        "S5": [
+            "Deep Learning",
+            "Computer Vision",
+            "Natural Language Processing",
+            "Reinforcement Learning",
+            "Cloud Computing",
+            "Data Mining",
+            "AI Laboratory",
+            "Machine Learning Laboratory",
+            "Professional Elective I",
+            "Professional Elective II",
+            "Open Elective I"
+        ],
+
+        "S6": [
+            "Advanced Machine Learning",
+            "Generative AI",
+            "Robotics",
+            "Computer Vision",
+            "NLP",
+            "MLOps",
+            "AI Laboratory",
+            "Data Analytics",
+            "Professional Elective III",
+            "Professional Elective IV",
+            "Open Elective II",
+            "Mini Project"
+        ],
+
+        "S7": [
+            "Generative AI",
+            "Advanced Deep Learning",
+            "MLOps",
+            "AI Security",
+            "Distributed AI",
+            "Project Phase I",
+            "Professional Elective V",
+            "Professional Elective VI",
+            "Open Elective III",
+            "Seminar"
+        ],
+
+        "S8": [
+            "Major Project",
+            "Project Phase II",
+            "Advanced AI Applications",
+            "Professional Elective VII",
+            "Professional Elective VIII",
+            "Open Elective IV",
+            "Industry Internship",
+            "Technical Seminar",
+            "Comprehensive Viva"
+        ]
+    }
 }
 
 
 # =========================================================
-# DEMO TEACHER ACCOUNTS
+# COPY SUBJECTS FOR OTHER BRANCHES
+# =========================================================
+
+COMMON_BRANCHES = [
+    "Computer Science and Engineering (Data Science)",
+    "Information Technology",
+    "Cyber Security",
+    "Electronics and Communication Engineering",
+    "Electrical and Electronics Engineering",
+    "Electronics and Instrumentation Engineering",
+    "Mechanical Engineering",
+    "Civil Engineering"
+]
+
+for branch in COMMON_BRANCHES:
+
+    SUBJECTS[branch] = {
+
+        "S1": [
+            "Engineering Mathematics I",
+            "Engineering Physics",
+            "Engineering Chemistry",
+            "Engineering Graphics",
+            "Programming in C",
+            "Life Skills",
+            "Electrical Engineering",
+            "Electronics Engineering",
+            "Engineering Workshop",
+            "Professional Communication",
+            "Environmental Science",
+            "Health and Wellness"
+        ],
+
+        "S2": [
+            "Engineering Mathematics II",
+            "Data Structures",
+            "Object Oriented Programming",
+            "Digital Electronics",
+            "Engineering Mechanics",
+            "Database Fundamentals",
+            "Discrete Mathematics",
+            "Python Programming",
+            "Professional Communication",
+            "Environmental Science",
+            "Computer Organization",
+            "Design Thinking"
+        ],
+
+        "S3": [
+            "Engineering Mathematics III",
+            "Data Structures and Algorithms",
+            "Database Management Systems",
+            "Operating Systems",
+            "Computer Organization",
+            "Object Oriented Programming",
+            "Probability and Statistics",
+            "Computer Networks",
+            "Digital Systems",
+            "Professional Ethics",
+            "Programming Laboratory",
+            "Branch Core I"
+        ],
+
+        "S4": [
+            "Engineering Mathematics IV",
+            "Computer Networks",
+            "Operating Systems",
+            "Design and Analysis of Algorithms",
+            "Software Engineering",
+            "Database Systems",
+            "Web Programming",
+            "Microprocessors",
+            "Theory of Computation",
+            "Branch Core II",
+            "Laboratory",
+            "Professional Elective I"
+        ],
+
+        "S5": [
+            "Machine Learning",
+            "Cloud Computing",
+            "Data Mining",
+            "Cyber Security",
+            "Internet of Things",
+            "Distributed Systems",
+            "Web Technologies",
+            "Professional Elective I",
+            "Professional Elective II",
+            "Open Elective I",
+            "Laboratory",
+            "Mini Project"
+        ],
+
+        "S6": [
+            "Artificial Intelligence",
+            "Machine Learning",
+            "Cloud Computing",
+            "Computer Security",
+            "Data Analytics",
+            "Internet of Things",
+            "Distributed Computing",
+            "Professional Elective III",
+            "Professional Elective IV",
+            "Open Elective II",
+            "Seminar",
+            "Mini Project"
+        ],
+
+        "S7": [
+            "Advanced Computing",
+            "Artificial Intelligence",
+            "Cloud Applications",
+            "Cyber Security",
+            "Advanced Data Analytics",
+            "Distributed Computing",
+            "Project Phase I",
+            "Professional Elective V",
+            "Professional Elective VI",
+            "Open Elective III",
+            "Seminar",
+            "Industrial Training"
+        ],
+
+        "S8": [
+            "Major Project",
+            "Project Phase II",
+            "Professional Elective VII",
+            "Professional Elective VIII",
+            "Open Elective IV",
+            "Advanced Engineering Applications",
+            "Industry Internship",
+            "Technical Seminar",
+            "Comprehensive Viva"
+        ]
+    }
+
+
+# =========================================================
+# TEACHER ACCOUNTS
 # =========================================================
 
 TEACHERS = {
@@ -191,7 +634,7 @@ TEACHERS = {
 
 
 # =========================================================
-# DATA PATHS
+# FILES
 # =========================================================
 
 DATA_DIR = "data"
@@ -206,11 +649,6 @@ REPORT_PATH = os.path.join(
     "student_reports.csv"
 )
 
-
-# =========================================================
-# CREATE DATA FOLDER
-# =========================================================
-
 os.makedirs(DATA_DIR, exist_ok=True)
 
 
@@ -218,20 +656,18 @@ os.makedirs(DATA_DIR, exist_ok=True)
 # SESSION STATE
 # =========================================================
 
-if "page" not in st.session_state:
-    st.session_state.page = "home"
+defaults = {
+    "page": "home",
+    "student_logged_in": False,
+    "teacher_logged_in": False,
+    "teacher_username": "",
+    "student_password": ""
+}
 
-if "student_logged_in" not in st.session_state:
-    st.session_state.student_logged_in = False
+for key, value in defaults.items():
 
-if "teacher_logged_in" not in st.session_state:
-    st.session_state.teacher_logged_in = False
-
-if "teacher_username" not in st.session_state:
-    st.session_state.teacher_username = ""
-
-if "student_password" not in st.session_state:
-    st.session_state.student_password = ""
+    if key not in st.session_state:
+        st.session_state[key] = value
 
 
 # =========================================================
@@ -242,7 +678,7 @@ st.title("🎓 Student Performance Prediction")
 
 
 # =========================================================
-# ATTENDANCE CONVERSION
+# ATTENDANCE MARK
 # =========================================================
 
 def attendance_mark(attendance):
@@ -250,24 +686,23 @@ def attendance_mark(attendance):
     if attendance >= 90:
         return 5
 
-    elif attendance >= 80:
+    if attendance >= 80:
         return 4
 
-    elif attendance >= 70:
+    if attendance >= 70:
         return 3
 
-    elif attendance >= 60:
+    if attendance >= 60:
         return 2
 
-    elif attendance >= 10:
+    if attendance >= 10:
         return 1
 
-    else:
-        return 0
+    return 0
 
 
 # =========================================================
-# PERFORMANCE ANALYSIS
+# PERFORMANCE LEVEL
 # =========================================================
 
 def performance_analysis(
@@ -278,29 +713,16 @@ def performance_analysis(
     previous
 ):
 
-    attendance_m = attendance_mark(attendance)
+    att_mark = attendance_mark(attendance)
 
-    attendance_percent = (attendance_m / 5) * 100
-
-    study_percent = min(
-        (study_hours / 6) * 100,
-        100
-    )
-
-    internal_percent = (
-        internal / 40
-    ) * 100
-
-    assignment_percent = (
-        assignment / 15
-    ) * 100
-
-    previous_percent = (
-        previous / 60
-    ) * 100
+    att_percent = att_mark / 5 * 100
+    study_percent = study_hours / 6 * 100
+    internal_percent = internal / 40 * 100
+    assignment_percent = assignment / 15 * 100
+    previous_percent = previous / 60 * 100
 
     overall = np.mean([
-        attendance_percent,
+        att_percent,
         study_percent,
         internal_percent,
         assignment_percent,
@@ -308,32 +730,23 @@ def performance_analysis(
     ])
 
     if overall < 50:
-
         level = "Low Performance"
         symbol = "🔴"
 
     elif overall < 65:
-
         level = "Average Performance"
         symbol = "🟠"
 
     elif overall < 80:
-
         level = "Above Average Performance"
         symbol = "🟡"
 
     else:
-
         level = "Good Performance"
         symbol = "🟢"
 
     return {
-        "attendance_mark": attendance_m,
-        "attendance_percent": attendance_percent,
-        "study_percent": study_percent,
-        "internal_percent": internal_percent,
-        "assignment_percent": assignment_percent,
-        "previous_percent": previous_percent,
+        "attendance_mark": att_mark,
         "overall": overall,
         "level": level,
         "symbol": symbol
@@ -352,39 +765,39 @@ def recommendations(
     previous
 ):
 
-    rec = []
+    result = []
 
     if attendance < 80:
-        rec.append(
+        result.append(
             "Improve attendance and attend classes regularly."
         )
 
     if study_hours < 3:
-        rec.append(
+        result.append(
             "Increase daily study time gradually."
         )
 
     if internal < 20:
-        rec.append(
-            "Focus more on internal examination preparation."
+        result.append(
+            "Give more attention to internal examination preparation."
         )
 
     if assignment < 8:
-        rec.append(
-            "Complete assignments regularly and on time."
+        result.append(
+            "Complete assignments regularly and submit them on time."
         )
 
     if previous < 30:
-        rec.append(
-            "Revise previous topics and strengthen fundamentals."
+        result.append(
+            "Revise previous topics and strengthen basic concepts."
         )
 
-    if not rec:
-        rec.append(
-            "Maintain your current performance and continue regular revision."
+    if not result:
+        result.append(
+            "Good progress. Maintain consistency and continue revision."
         )
 
-    return rec
+    return result
 
 
 # =========================================================
@@ -405,7 +818,16 @@ def load_dataset():
 
 
 # =========================================================
-# TRAIN ML MODELS
+# TRAIN MODEL
+#
+# All model features are converted to percentage scale.
+# This allows the UI to use:
+#
+# Attendance 0-100
+# Study Hours 0-6
+# Internal 0-40
+# Assignment 0-15
+# Previous 0-60
 # =========================================================
 
 @st.cache_resource
@@ -416,7 +838,7 @@ def train_models():
     if data is None:
         return None
 
-    required_columns = [
+    required = [
         "Attendance",
         "Study_Hours",
         "Internal_Mark",
@@ -425,39 +847,58 @@ def train_models():
         "Performance"
     ]
 
-    for col in required_columns:
+    for column in required:
 
-        if col not in data.columns:
+        if column not in data.columns:
             return None
 
-    X = data[
-        [
-            "Attendance",
-            "Study_Hours",
-            "Internal_Mark",
-            "Assignment",
-            "Previous_Mark"
-        ]
-    ].copy()
+    data = data.copy()
 
-    y = data["Performance"]
+    numeric_columns = required[:-1]
 
-    X = X.apply(
-        pd.to_numeric,
-        errors="coerce"
+    for column in numeric_columns:
+
+        data[column] = pd.to_numeric(
+            data[column],
+            errors="coerce"
+        )
+
+    data = data.dropna(
+        subset=required
     )
 
-    valid = X.notna().all(axis=1) & y.notna()
-
-    X = X[valid]
-    y = y[valid]
-
-    if len(X) < 10:
+    if len(data) < 10:
         return None
 
-    # -----------------------------
-    # K-MEANS
-    # -----------------------------
+    # Convert every feature to 0-100 scale
+
+    X = pd.DataFrame()
+
+    X["Attendance"] = (
+        data["Attendance"].clip(0, 100)
+    )
+
+    X["Study_Hours"] = (
+        data["Study_Hours"].clip(0, 6)
+        / 6 * 100
+    )
+
+    X["Internal_Mark"] = (
+        data["Internal_Mark"].clip(0, 40)
+        / 40 * 100
+    )
+
+    X["Assignment"] = (
+        data["Assignment"].clip(0, 15)
+        / 15 * 100
+    )
+
+    X["Previous_Mark"] = (
+        data["Previous_Mark"].clip(0, 60)
+        / 60 * 100
+    )
+
+    y = data["Performance"].astype(str)
 
     scaler = StandardScaler()
 
@@ -469,7 +910,7 @@ def train_models():
         n_init=10
     )
 
-    clusters = kmeans.fit_predict(
+    cluster_values = kmeans.fit_predict(
         X_scaled
     )
 
@@ -477,16 +918,12 @@ def train_models():
 
         silhouette = silhouette_score(
             X_scaled,
-            clusters
+            cluster_values
         )
 
     except Exception:
 
         silhouette = 0
-
-    # -----------------------------
-    # RANDOM FOREST
-    # -----------------------------
 
     X_train, X_test, y_train, y_test = train_test_split(
         X,
@@ -506,13 +943,13 @@ def train_models():
         y_train
     )
 
-    y_pred = model.predict(
+    predictions = model.predict(
         X_test
     )
 
     accuracy = accuracy_score(
         y_test,
-        y_pred
+        predictions
     )
 
     return {
@@ -530,7 +967,7 @@ def train_models():
 
 def save_student_report(record):
 
-    df_new = pd.DataFrame(
+    new_data = pd.DataFrame(
         [record]
     )
 
@@ -538,278 +975,522 @@ def save_student_report(record):
 
         try:
 
-            df_old = pd.read_csv(
+            old_data = pd.read_csv(
                 REPORT_PATH
             )
 
-            df = pd.concat(
-                [df_old, df_new],
+            final_data = pd.concat(
+                [old_data, new_data],
                 ignore_index=True
             )
 
         except Exception:
 
-            df = df_new
+            final_data = new_data
 
     else:
 
-        df = df_new
+        final_data = new_data
 
-    df.to_csv(
+    final_data.to_csv(
         REPORT_PATH,
         index=False
     )
 
 
 # =========================================================
-# GENERATE HTML REPORT
+# CREATE PDF REPORT
 # =========================================================
 
-def create_html_report(
+def create_pdf_report(
     student_name,
     university_id,
     semester,
     branch,
     subject_results,
-    ml_results
+    ml_prediction,
+    ml_confidence,
+    cluster,
+    model_accuracy
 ):
 
-    rows = ""
+    buffer = io.BytesIO()
 
-    for item in subject_results:
-
-        rows += f"""
-        <tr>
-            <td>{html.escape(str(item["subject"]))}</td>
-            <td>{item["attendance"]}%</td>
-            <td>{item["study_hours"]}</td>
-            <td>{item["internal"]}/40</td>
-            <td>{item["assignment"]}/15</td>
-            <td>{item["previous"]}/60</td>
-            <td>{item["symbol"]} {html.escape(item["level"])}</td>
-            <td>{item["overall"]:.1f}%</td>
-        </tr>
-        """
-
-    ml_prediction = html.escape(
-        str(ml_results["prediction"])
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=landscape(A4),
+        rightMargin=25,
+        leftMargin=25,
+        topMargin=25,
+        bottomMargin=25
     )
 
-    confidence = ml_results["confidence"]
-
-    cluster = ml_results["cluster"]
-
-    accuracy = ml_results["accuracy"] * 100
-
-    document = f"""
-<!DOCTYPE html>
-
-<html>
-
-<head>
-
-<meta charset="UTF-8">
-
-<title>Student Progress Report</title>
-
-<style>
-
-body {{
-    font-family: Arial, sans-serif;
-    margin: 40px;
-    color: #222;
-}}
-
-h1 {{
-    text-align: center;
-}}
-
-h2 {{
-    margin-top: 30px;
-}}
-
-.info {{
-    border: 1px solid #ccc;
-    padding: 15px;
-    margin-bottom: 20px;
-}}
-
-table {{
-    width: 100%;
-    border-collapse: collapse;
-    margin-top: 15px;
-}}
-
-th, td {{
-    border: 1px solid #aaa;
-    padding: 8px;
-    text-align: center;
-}}
-
-th {{
-    background: #eeeeee;
-}}
-
-.note {{
-    margin-top: 30px;
-    padding: 15px;
-    border: 1px solid #ccc;
-}}
-
-@media print {{
-
-    body {{
-        margin: 20px;
-    }}
-
-}}
-
-</style>
-
-</head>
-
-<body>
-
-<h1>🎓 Student Progress Report</h1>
-
-<div class="info">
-
-<p><b>Student Name:</b>
-{html.escape(student_name)}
-</p>
-
-<p><b>University ID:</b>
-{html.escape(university_id)}
-</p>
-
-<p><b>Semester:</b>
-{html.escape(semester)}
-</p>
-
-<p><b>Branch:</b>
-{html.escape(branch)}
-</p>
-
-</div>
-
-
-<h2>Subject-wise Performance</h2>
-
-<table>
-
-<tr>
-
-<th>Subject</th>
-<th>Attendance</th>
-<th>Study Hours</th>
-<th>Internal</th>
-<th>Assignment</th>
-<th>Previous Mark</th>
-<th>Performance</th>
-<th>Overall</th>
-
-</tr>
-
-{rows}
-
-</table>
-
-
-<h2>Performance Indicator</h2>
-
-<p>
-🔴 Low Performance
-</p>
-
-<p>
-🟠 Average Performance
-</p>
-
-<p>
-🟡 Above Average Performance
-</p>
-
-<p>
-🟢 Good Performance
-</p>
-
-
-<h2>Machine Learning Prediction</h2>
-
-<div class="info">
-
-<p>
-<b>Random Forest Prediction:</b>
-{ml_prediction}
-</p>
-
-<p>
-<b>Model Confidence:</b>
-{confidence:.1f}%
-</p>
-
-<p>
-<b>K-Means Cluster:</b>
-{cluster}
-</p>
-
-<p>
-<b>Random Forest Test Accuracy:</b>
-{accuracy:.2f}%
-</p>
-
-</div>
-
-
-<h2>Improvement Suggestions</h2>
-
-<ul>
-"""
-
-    for item in subject_results:
-
-        document += f"""
-
-<li>
-<b>{html.escape(item["subject"])}:</b>
-"""
-
-        for rec in item["recommendations"]:
-
-            document += f"""
-
-{html.escape(rec)}<br>
-
-"""
-
-        document += "</li>"
-
-    document += """
-
-</ul>
-
-
-<div class="note">
-
-<b>Note:</b>
-
-This report is generated using machine learning
-and academic performance indicators. The prediction
-is intended to support academic monitoring and should
-not replace teacher or institutional evaluation.
-
-</div>
-
-</body>
-
-</html>
-"""
-
-    return document
+    styles = getSampleStyleSheet()
+
+    title_style = ParagraphStyle(
+        "ReportTitle",
+        parent=styles["Title"],
+        alignment=TA_CENTER,
+        fontSize=20,
+        spaceAfter=15
+    )
+
+    heading_style = ParagraphStyle(
+        "Heading",
+        parent=styles["Heading2"],
+        fontSize=14,
+        spaceBefore=12,
+        spaceAfter=8
+    )
+
+    normal_style = ParagraphStyle(
+        "Normal",
+        parent=styles["Normal"],
+        fontSize=9,
+        leading=12
+    )
+
+    story = []
+
+    # -----------------------------------------------------
+    # TITLE
+    # -----------------------------------------------------
+
+    story.append(
+        Paragraph(
+            "STUDENT PERFORMANCE PROGRESS REPORT",
+            title_style
+        )
+    )
+
+    story.append(
+        Paragraph(
+            "AI & Data Science - Machine Learning Based Academic Analysis",
+            normal_style
+        )
+    )
+
+    story.append(
+        Spacer(1, 12)
+    )
+
+    # -----------------------------------------------------
+    # STUDENT INFORMATION
+    # -----------------------------------------------------
+
+    story.append(
+        Paragraph(
+            "1. Student Information",
+            heading_style
+        )
+    )
+
+    student_table = Table(
+        [
+            [
+                "Student Name",
+                student_name,
+                "University ID",
+                university_id
+            ],
+            [
+                "Semester",
+                semester,
+                "Branch",
+                branch
+            ]
+        ],
+        colWidths=[
+            90, 180, 90, 350
+        ]
+    )
+
+    student_table.setStyle(
+        TableStyle([
+            ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
+            ("BACKGROUND", (0, 0), (0, -1), colors.lightgrey),
+            ("BACKGROUND", (2, 0), (2, -1), colors.lightgrey),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ("FONTNAME", (0, 0), (-1, -1), "Helvetica"),
+            ("FONTSIZE", (0, 0), (-1, -1), 8)
+        ])
+    )
+
+    story.append(
+        student_table
+    )
+
+    story.append(
+        Spacer(1, 15)
+    )
+
+    # -----------------------------------------------------
+    # SUBJECT TABLE
+    # -----------------------------------------------------
+
+    story.append(
+        Paragraph(
+            "2. Subject-wise Academic Performance",
+            heading_style
+        )
+    )
+
+    table_data = [
+        [
+            "Subject",
+            "Attendance",
+            "Study\nHours",
+            "Internal\n/40",
+            "Assignment\n/15",
+            "Previous\n/60",
+            "Level",
+            "Overall"
+        ]
+    ]
+
+    for result in subject_results:
+
+        table_data.append([
+            result["subject"],
+            f'{result["attendance"]}%',
+            f'{result["study_hours"]:.1f}',
+            f'{result["internal"]}/40',
+            f'{result["assignment"]}/15',
+            f'{result["previous"]}/60',
+            f'{result["symbol"]} {result["level"]}',
+            f'{result["overall"]:.1f}%'
+        ])
+
+    subject_table = Table(
+        table_data,
+        repeatRows=1,
+        colWidths=[
+            155,
+            65,
+            55,
+            65,
+            75,
+            75,
+            145,
+            60
+        ]
+    )
+
+    subject_table.setStyle(
+        TableStyle([
+            (
+                "BACKGROUND",
+                (0, 0),
+                (-1, 0),
+                colors.HexColor("#D9EAF7")
+            ),
+            (
+                "TEXTCOLOR",
+                (0, 0),
+                (-1, 0),
+                colors.black
+            ),
+            (
+                "GRID",
+                (0, 0),
+                (-1, -1),
+                0.5,
+                colors.grey
+            ),
+            (
+                "ALIGN",
+                (1, 1),
+                (-1, -1),
+                "CENTER"
+            ),
+            (
+                "VALIGN",
+                (0, 0),
+                (-1, -1),
+                "MIDDLE"
+            ),
+            (
+                "FONTSIZE",
+                (0, 0),
+                (-1, -1),
+                7
+            )
+        ])
+    )
+
+    story.append(
+        subject_table
+    )
+
+    story.append(
+        Spacer(1, 15)
+    )
+
+    # -----------------------------------------------------
+    # PERFORMANCE INDICATORS
+    # -----------------------------------------------------
+
+    story.append(
+        Paragraph(
+            "3. Performance Indicator",
+            heading_style
+        )
+    )
+
+    indicator_data = [
+        ["Indicator", "Meaning"],
+        ["🔴 Low Performance", "Needs improvement"],
+        ["🟠 Average Performance", "Moderate performance"],
+        ["🟡 Above Average Performance", "Good progress with scope for improvement"],
+        ["🟢 Good Performance", "Good academic performance"]
+    ]
+
+    indicator_table = Table(
+        indicator_data,
+        colWidths=[200, 450]
+    )
+
+    indicator_table.setStyle(
+        TableStyle([
+            (
+                "BACKGROUND",
+                (0, 0),
+                (-1, 0),
+                colors.lightgrey
+            ),
+            (
+                "GRID",
+                (0, 0),
+                (-1, -1),
+                0.5,
+                colors.grey
+            ),
+            (
+                "FONTSIZE",
+                (0, 0),
+                (-1, -1),
+                8
+            )
+        ])
+    )
+
+    story.append(
+        indicator_table
+    )
+
+    story.append(
+        Spacer(1, 15)
+    )
+
+    # -----------------------------------------------------
+    # MACHINE LEARNING RESULT
+    # -----------------------------------------------------
+
+    story.append(
+        Paragraph(
+            "4. Machine Learning Result",
+            heading_style
+        )
+    )
+
+    ml_table = Table(
+        [
+            ["Parameter", "Result"],
+            [
+                "Random Forest Prediction",
+                str(ml_prediction)
+            ],
+            [
+                "Model Confidence",
+                f"{ml_confidence:.2f}%"
+            ],
+            [
+                "K-Means Cluster",
+                str(cluster)
+            ],
+            [
+                "Random Forest Test Accuracy",
+                f"{model_accuracy * 100:.2f}%"
+            ]
+        ],
+        colWidths=[250, 300]
+    )
+
+    ml_table.setStyle(
+        TableStyle([
+            (
+                "BACKGROUND",
+                (0, 0),
+                (-1, 0),
+                colors.lightgrey
+            ),
+            (
+                "GRID",
+                (0, 0),
+                (-1, -1),
+                0.5,
+                colors.grey
+            ),
+            (
+                "FONTSIZE",
+                (0, 0),
+                (-1, -1),
+                9
+            )
+        ])
+    )
+
+    story.append(
+        ml_table
+    )
+
+    story.append(
+        PageBreak()
+    )
+
+    # -----------------------------------------------------
+    # SUBJECT RECOMMENDATIONS
+    # -----------------------------------------------------
+
+    story.append(
+        Paragraph(
+            "5. Subject-wise Improvement Plan",
+            heading_style
+        )
+    )
+
+    for result in subject_results:
+
+        story.append(
+            Paragraph(
+                f'{result["symbol"]} '
+                f'<b>{html.escape(result["subject"])}</b>',
+                normal_style
+            )
+        )
+
+        story.append(
+            Paragraph(
+                f'Performance Level: '
+                f'<b>{html.escape(result["level"])}</b>',
+                normal_style
+            )
+        )
+
+        story.append(
+            Paragraph(
+                f'Overall Score: '
+                f'{result["overall"]:.1f}%',
+                normal_style
+            )
+        )
+
+        for recommendation in result[
+            "recommendations"
+        ]:
+
+            story.append(
+                Paragraph(
+                    "• " +
+                    html.escape(
+                        recommendation
+                    ),
+                    normal_style
+                )
+            )
+
+        story.append(
+            Spacer(1, 8)
+        )
+
+    # -----------------------------------------------------
+    # ATTENDANCE CONVERSION
+    # -----------------------------------------------------
+
+    story.append(
+        Paragraph(
+            "6. Attendance Mark Conversion",
+            heading_style
+        )
+    )
+
+    attendance_table = Table(
+        [
+            ["Attendance", "Converted Mark"],
+            ["90% - 100%", "5"],
+            ["80% - 89%", "4"],
+            ["70% - 79%", "3"],
+            ["60% - 69%", "2"],
+            ["10% - 59%", "1"],
+            ["Below 10%", "0"]
+        ],
+        colWidths=[180, 150]
+    )
+
+    attendance_table.setStyle(
+        TableStyle([
+            (
+                "BACKGROUND",
+                (0, 0),
+                (-1, 0),
+                colors.lightgrey
+            ),
+            (
+                "GRID",
+                (0, 0),
+                (-1, -1),
+                0.5,
+                colors.grey
+            ),
+            (
+                "ALIGN",
+                (1, 0),
+                (-1, -1),
+                "CENTER"
+            ),
+            (
+                "FONTSIZE",
+                (0, 0),
+                (-1, -1),
+                9
+            )
+        ])
+    )
+
+    story.append(
+        attendance_table
+    )
+
+    story.append(
+        Spacer(1, 20)
+    )
+
+    # -----------------------------------------------------
+    # NOTE
+    # -----------------------------------------------------
+
+    story.append(
+        Paragraph(
+            "<b>Note:</b> This report is generated by the "
+            "Student Performance Prediction project using "
+            "K-Means clustering and Random Forest classification. "
+            "The performance categories used by this project are "
+            "project-defined indicators and are not official KTU grades. "
+            "The report is intended to support academic monitoring "
+            "and should not replace teacher or institutional evaluation.",
+            normal_style
+        )
+    )
+
+    doc.build(story)
+
+    buffer.seek(0)
+
+    return buffer.getvalue()
 
 
 # =========================================================
-# HOME PAGE
+# HOME
 # =========================================================
 
 if st.session_state.page == "home":
@@ -826,7 +1507,6 @@ if st.session_state.page == "home":
         ):
 
             st.session_state.page = "student_login"
-
             st.rerun()
 
     with col2:
@@ -837,7 +1517,6 @@ if st.session_state.page == "home":
         ):
 
             st.session_state.page = "teacher_login"
-
             st.rerun()
 
 
@@ -865,22 +1544,19 @@ elif st.session_state.page == "student_login":
 
             if password[:5].upper() == "BTECH":
 
-                year_text = password[5:]
+                year = password[5:]
 
-                if year_text.isdigit():
+                if year.isdigit():
 
-                    year = int(year_text)
+                    year_value = int(year)
 
-                    if 2000 <= year <= 2020:
-
+                    if 2000 <= year_value <= 2020:
                         valid = True
 
         if valid:
 
             st.session_state.student_logged_in = True
-
             st.session_state.student_password = password
-
             st.session_state.page = "student_dashboard"
 
             st.rerun()
@@ -891,12 +1567,9 @@ elif st.session_state.page == "student_login":
                 "Invalid student password."
             )
 
-    if st.button(
-        "⬅ Back"
-    ):
+    if st.button("⬅ Back"):
 
         st.session_state.page = "home"
-
         st.rerun()
 
 
@@ -929,9 +1602,7 @@ elif st.session_state.page == "teacher_login":
         ):
 
             st.session_state.teacher_logged_in = True
-
             st.session_state.teacher_username = username
-
             st.session_state.page = "teacher_dashboard"
 
             st.rerun()
@@ -942,12 +1613,9 @@ elif st.session_state.page == "teacher_login":
                 "Invalid username or password."
             )
 
-    if st.button(
-        "⬅ Back"
-    ):
+    if st.button("⬅ Back"):
 
         st.session_state.page = "home"
-
         st.rerun()
 
 
@@ -960,32 +1628,28 @@ elif st.session_state.page == "student_dashboard":
     if not st.session_state.student_logged_in:
 
         st.session_state.page = "home"
-
         st.rerun()
 
     st.subheader("🎓 Student Dashboard")
 
-    if st.button(
-        "Logout"
-    ):
+    if st.button("Logout"):
 
         st.session_state.student_logged_in = False
-
         st.session_state.page = "home"
 
         st.rerun()
 
     st.divider()
 
-    # -----------------------------------------------
-    # STUDENT INFORMATION
-    # -----------------------------------------------
+    # -----------------------------------------------------
+    # STUDENT DETAILS
+    # -----------------------------------------------------
 
     st.header("Student Information")
 
-    c1, c2 = st.columns(2)
+    col1, col2 = st.columns(2)
 
-    with c1:
+    with col1:
 
         student_name = st.text_input(
             "Student Name"
@@ -994,6 +1658,8 @@ elif st.session_state.page == "student_dashboard":
         university_id = st.text_input(
             "University ID"
         )
+
+    with col2:
 
         semester = st.selectbox(
             "Semester",
@@ -1009,45 +1675,77 @@ elif st.session_state.page == "student_dashboard":
             ]
         )
 
-    with c2:
-
         branch = st.selectbox(
             "Branch",
-            list(BRANCH_SUBJECTS.keys())
+            BRANCHES
         )
 
-    subjects = BRANCH_SUBJECTS[branch]
+    # -----------------------------------------------------
+    # SUBJECT SELECTION
+    # -----------------------------------------------------
+
+    st.header(
+        f"📚 {semester} Subject Selection"
+    )
+
+    available_subjects = SUBJECTS[
+        branch
+    ][semester]
+
+    st.write(
+        f"Available subjects: "
+        f"**{len(available_subjects)}**"
+    )
 
     st.info(
-        "Exactly 6 subjects are required."
+        "Select exactly 6 subjects."
     )
 
     selected_subjects = st.multiselect(
-        "Select 6 Subjects",
-        subjects,
+        "Choose Subjects",
+        available_subjects,
         max_selections=6
     )
 
-    if len(selected_subjects) != 6:
+    if len(selected_subjects) < 6:
 
         st.warning(
-            "Please select exactly 6 subjects."
+            f"Please select "
+            f"{6 - len(selected_subjects)} "
+            f"more subject(s)."
         )
 
-    # -----------------------------------------------
-    # SUBJECT INPUTS
-    # -----------------------------------------------
+    elif len(selected_subjects) > 6:
+
+        st.error(
+            "You can select only 6 subjects."
+        )
+
+    else:
+
+        st.success(
+            "Exactly 6 subjects selected."
+        )
+
+    # -----------------------------------------------------
+    # ACADEMIC DATA
+    # -----------------------------------------------------
 
     subject_inputs = {}
 
     if len(selected_subjects) == 6:
 
-        st.header("Academic Information")
+        st.header(
+            "📊 Academic Information"
+        )
 
-        for subject in selected_subjects:
+        for index, subject in enumerate(
+            selected_subjects,
+            start=1
+        ):
 
             st.subheader(
-                f"📚 {subject}"
+                f"{index}. {subject}"
             )
 
             c1, c2, c3, c4, c5 = st.columns(5)
@@ -1056,10 +1754,11 @@ elif st.session_state.page == "student_dashboard":
 
                 attendance = st.number_input(
                     "Attendance (%)",
-                    min_value=0,
-                    max_value=100,
-                    value=80,
-                    key=f"attendance_{subject}"
+                    min_value=0.0,
+                    max_value=100.0,
+                    value=80.0,
+                    step=1.0,
+                    key=f"att_{subject}"
                 )
 
             with c2:
@@ -1077,9 +1776,10 @@ elif st.session_state.page == "student_dashboard":
 
                 internal = st.number_input(
                     "Internal Mark / 40",
-                    min_value=0,
-                    max_value=40,
-                    value=25,
+                    min_value=0.0,
+                    max_value=40.0,
+                    value=25.0,
+                    step=1.0,
                     key=f"internal_{subject}"
                 )
 
@@ -1087,9 +1787,10 @@ elif st.session_state.page == "student_dashboard":
 
                 assignment = st.number_input(
                     "Assignment / 15",
-                    min_value=0,
-                    max_value=15,
-                    value=10,
+                    min_value=0.0,
+                    max_value=15.0,
+                    value=10.0,
+                    step=1.0,
                     key=f"assignment_{subject}"
                 )
 
@@ -1097,9 +1798,10 @@ elif st.session_state.page == "student_dashboard":
 
                 previous = st.number_input(
                     "Previous Mark / 60",
-                    min_value=0,
-                    max_value=60,
-                    value=40,
+                    min_value=0.0,
+                    max_value=60.0,
+                    value=40.0,
+                    step=1.0,
                     key=f"previous_{subject}"
                 )
 
@@ -1111,9 +1813,9 @@ elif st.session_state.page == "student_dashboard":
                 "previous": previous
             }
 
-    # -----------------------------------------------
-    # PREDICT
-    # -----------------------------------------------
+    # -----------------------------------------------------
+    # PREDICT BUTTON
+    # -----------------------------------------------------
 
     if len(selected_subjects) == 6:
 
@@ -1125,301 +1827,281 @@ elif st.session_state.page == "student_dashboard":
             if not student_name.strip():
 
                 st.error(
-                    "Please enter student name."
+                    "Please enter Student Name."
                 )
 
-            elif not university_id.strip():
+                st.stop()
+
+            if not university_id.strip():
 
                 st.error(
-                    "Please enter university ID."
+                    "Please enter University ID."
                 )
 
-            else:
+                st.stop()
 
-                models = train_models()
+            models = train_models()
 
-                if models is None:
+            if models is None:
 
-                    st.error(
-                        "Dataset/model could not be loaded. "
-                        "Check data/student_performance.csv."
+                st.error(
+                    "Model could not be trained. "
+                    "Please check data/student_performance.csv "
+                    "and make sure it contains the required columns."
+                )
+
+                st.stop()
+
+            subject_results = []
+
+            predictions = []
+            confidences = []
+            clusters = []
+
+            for subject in selected_subjects:
+
+                values = subject_inputs[subject]
+
+                analysis = performance_analysis(
+                    values["attendance"],
+                    values["study_hours"],
+                    values["internal"],
+                    values["assignment"],
+                    values["previous"]
+                )
+
+                recs = recommendations(
+                    values["attendance"],
+                    values["study_hours"],
+                    values["internal"],
+                    values["assignment"],
+                    values["previous"]
+                )
+
+                # Convert to 0-100 scale
+                model_input = pd.DataFrame(
+                    [[
+                        values["attendance"],
+                        values["study_hours"] / 6 * 100,
+                        values["internal"] / 40 * 100,
+                        values["assignment"] / 15 * 100,
+                        values["previous"] / 60 * 100
+                    ]],
+                    columns=[
+                        "Attendance",
+                        "Study_Hours",
+                        "Internal_Mark",
+                        "Assignment",
+                        "Previous_Mark"
+                    ]
+                )
+
+                # Random Forest
+                prediction = models[
+                    "model"
+                ].predict(
+                    model_input
+                )[0]
+
+                probability = models[
+                    "model"
+                ].predict_proba(
+                    model_input
+                )[0]
+
+                confidence = (
+                    max(probability) * 100
+                )
+
+                # K-Means
+                scaled = models[
+                    "scaler"
+                ].transform(
+                    model_input
+                )
+
+                cluster = int(
+                    models["kmeans"].predict(
+                        scaled
+                    )[0]
+                )
+
+                predictions.append(
+                    str(prediction)
+                )
+
+                confidences.append(
+                    confidence
+                )
+
+                clusters.append(
+                    cluster
+                )
+
+                subject_results.append({
+                    "subject": subject,
+                    "attendance": values["attendance"],
+                    "study_hours": values["study_hours"],
+                    "internal": values["internal"],
+                    "assignment": values["assignment"],
+                    "previous": values["previous"],
+                    "level": analysis["level"],
+                    "symbol": analysis["symbol"],
+                    "overall": analysis["overall"],
+                    "recommendations": recs
+                })
+
+            # -------------------------------------------------
+            # OVERALL PREDICTION
+            # -------------------------------------------------
+
+            prediction_counts = pd.Series(
+                predictions
+            ).value_counts()
+
+            overall_prediction = (
+                prediction_counts.index[0]
+            )
+
+            overall_confidence = float(
+                np.mean(confidences)
+            )
+
+            overall_cluster = int(
+                round(np.mean(clusters))
+            )
+
+            # -------------------------------------------------
+            # DISPLAY RESULT
+            # -------------------------------------------------
+
+            st.divider()
+
+            st.header(
+                "📈 Overall Prediction"
+            )
+
+            c1, c2, c3 = st.columns(3)
+
+            with c1:
+
+                st.metric(
+                    "Random Forest Prediction",
+                    overall_prediction
+                )
+
+            with c2:
+
+                st.metric(
+                    "Confidence",
+                    f"{overall_confidence:.1f}%"
+                )
+
+            with c3:
+
+                st.metric(
+                    "K-Means Cluster",
+                    overall_cluster
+                )
+
+            # -------------------------------------------------
+            # SUBJECT RESULTS
+            # -------------------------------------------------
+
+            st.header(
+                "📚 Subject-wise Result"
+            )
+
+            for result in subject_results:
+
+                with st.container(
+                    border=True
+                ):
+
+                    st.subheader(
+                        f'{result["symbol"]} '
+                        f'{result["subject"]}'
                     )
 
-                else:
-
-                    subject_results = []
-
-                    ml_predictions = []
-
-                    confidence_values = []
-
-                    clusters = []
-
-                    for subject in selected_subjects:
-
-                        values = subject_inputs[subject]
-
-                        analysis = performance_analysis(
-                            values["attendance"],
-                            values["study_hours"],
-                            values["internal"],
-                            values["assignment"],
-                            values["previous"]
-                        )
-
-                        recs = recommendations(
-                            values["attendance"],
-                            values["study_hours"],
-                            values["internal"],
-                            values["assignment"],
-                            values["previous"]
-                        )
-
-                        # ----------------------------------
-                        # Convert UI values to model scale
-                        # ----------------------------------
-
-                        model_input = pd.DataFrame(
-                            [[
-                                values["attendance"],
-                                values["study_hours"] / 6 * 10,
-                                values["internal"] / 40 * 100,
-                                values["assignment"] / 15 * 100,
-                                values["previous"] / 60 * 100
-                            ]],
-                            columns=[
-                                "Attendance",
-                                "Study_Hours",
-                                "Internal_Mark",
-                                "Assignment",
-                                "Previous_Mark"
-                            ]
-                        )
-
-                        # ----------------------------------
-                        # Random Forest
-                        # ----------------------------------
-
-                        prediction = models["model"].predict(
-                            model_input
-                        )[0]
-
-                        probabilities = models[
-                            "model"
-                        ].predict_proba(
-                            model_input
-                        )[0]
-
-                        confidence = float(
-                            max(probabilities)
-                        ) * 100
-
-                        # ----------------------------------
-                        # K-Means
-                        # ----------------------------------
-
-                        scaled_input = models[
-                            "scaler"
-                        ].transform(
-                            model_input
-                        )
-
-                        cluster = int(
-                            models["kmeans"].predict(
-                                scaled_input
-                            )[0]
-                        )
-
-                        ml_predictions.append(
-                            str(prediction)
-                        )
-
-                        confidence_values.append(
-                            confidence
-                        )
-
-                        clusters.append(
-                            cluster
-                        )
-
-                        subject_results.append({
-                            "subject": subject,
-                            "attendance": values["attendance"],
-                            "study_hours": values["study_hours"],
-                            "internal": values["internal"],
-                            "assignment": values["assignment"],
-                            "previous": values["previous"],
-                            "level": analysis["level"],
-                            "symbol": analysis["symbol"],
-                            "overall": analysis["overall"],
-                            "recommendations": recs
-                        })
-
-                    # --------------------------------------
-                    # OVERALL ML RESULT
-                    # --------------------------------------
-
-                    prediction_counts = pd.Series(
-                        ml_predictions
-                    ).value_counts()
-
-                    overall_prediction = (
-                        prediction_counts.index[0]
+                    st.write(
+                        f'**Performance:** '
+                        f'{result["level"]}'
                     )
 
-                    overall_confidence = np.mean(
-                        confidence_values
+                    st.write(
+                        f'**Overall:** '
+                        f'{result["overall"]:.1f}%'
                     )
 
-                    overall_cluster = int(
-                        round(
-                            np.mean(clusters)
-                        )
-                    )
+                    for recommendation in result[
+                        "recommendations"
+                    ]:
 
-                    ml_results = {
-                        "prediction": overall_prediction,
-                        "confidence": overall_confidence,
-                        "cluster": overall_cluster,
-                        "accuracy": models["accuracy"]
-                    }
-
-                    # --------------------------------------
-                    # DISPLAY RESULTS
-                    # --------------------------------------
-
-                    st.divider()
-
-                    st.header(
-                        "📊 Performance Result"
-                    )
-
-                    col1, col2, col3 = st.columns(3)
-
-                    with col1:
-
-                        st.metric(
-                            "Random Forest Prediction",
-                            overall_prediction
+                        st.write(
+                            f"• {recommendation}"
                         )
 
-                    with col2:
+            # -------------------------------------------------
+            # SAVE TO DATABASE/CSV
+            # -------------------------------------------------
 
-                        st.metric(
-                            "Confidence",
-                            f"{overall_confidence:.1f}%"
-                        )
+            for result in subject_results:
 
-                    with col3:
+                save_student_report({
+                    "Student_Name": student_name,
+                    "University_ID": university_id,
+                    "Semester": semester,
+                    "Branch": branch,
+                    "Subject": result["subject"],
+                    "Attendance": result["attendance"],
+                    "Study_Hours": result["study_hours"],
+                    "Internal_Mark": result["internal"],
+                    "Assignment": result["assignment"],
+                    "Previous_Mark": result["previous"],
+                    "Performance_Level": result["level"],
+                    "Overall_Percent": round(
+                        result["overall"],
+                        2
+                    ),
+                    "ML_Prediction": overall_prediction,
+                    "ML_Confidence": round(
+                        overall_confidence,
+                        2
+                    ),
+                    "Cluster": overall_cluster
+                })
 
-                        st.metric(
-                            "K-Means Cluster",
-                            overall_cluster
-                        )
+            # -------------------------------------------------
+            # PDF
+            # -------------------------------------------------
 
-                    # --------------------------------------
-                    # SUBJECT RESULTS
-                    # --------------------------------------
+            pdf_data = create_pdf_report(
+                student_name,
+                university_id,
+                semester,
+                branch,
+                subject_results,
+                overall_prediction,
+                overall_confidence,
+                overall_cluster,
+                models["accuracy"]
+            )
 
-                    st.header(
-                        "📚 Subject-wise Performance"
-                    )
+            st.download_button(
+                label="📥 Download Complete Progress Report PDF",
+                data=pdf_data,
+                file_name=(
+                    f"{university_id}_"
+                    f"{semester}_"
+                    "Progress_Report.pdf"
+                ),
+                mime="application/pdf",
+                width="stretch"
+            )
 
-                    for result in subject_results:
-
-                        with st.container(
-                            border=True
-                        ):
-
-                            st.subheader(
-                                f"{result['symbol']} "
-                                f"{result['subject']}"
-                            )
-
-                            st.write(
-                                f"**Performance:** "
-                                f"{result['level']}"
-                            )
-
-                            st.write(
-                                f"**Overall Score:** "
-                                f"{result['overall']:.1f}%"
-                            )
-
-                            st.write(
-                                "**Improvement / Feedback:**"
-                            )
-
-                            for rec in result[
-                                "recommendations"
-                            ]:
-
-                                st.write(
-                                    f"• {rec}"
-                                )
-
-                    # --------------------------------------
-                    # SAVE REPORT
-                    # --------------------------------------
-
-                    for result in subject_results:
-
-                        save_student_report({
-                            "Student_Name": student_name,
-                            "University_ID": university_id,
-                            "Semester": semester,
-                            "Branch": branch,
-                            "Subject": result["subject"],
-                            "Attendance": result["attendance"],
-                            "Study_Hours": result["study_hours"],
-                            "Internal_Mark": result["internal"],
-                            "Assignment": result["assignment"],
-                            "Previous_Mark": result["previous"],
-                            "Performance_Level": result["level"],
-                            "Overall_Percent": round(
-                                result["overall"],
-                                2
-                            ),
-                            "ML_Prediction": overall_prediction,
-                            "ML_Confidence": round(
-                                overall_confidence,
-                                2
-                            ),
-                            "Cluster": overall_cluster
-                        })
-
-                    # --------------------------------------
-                    # HTML REPORT
-                    # --------------------------------------
-
-                    report_html = create_html_report(
-                        student_name,
-                        university_id,
-                        semester,
-                        branch,
-                        subject_results,
-                        ml_results
-                    )
-
-                    st.download_button(
-                        label="📥 Download Progress Report",
-                        data=report_html,
-                        file_name=(
-                            f"{university_id}_"
-                            "Progress_Report.html"
-                        ),
-                        mime="text/html",
-                        width="stretch"
-                    )
-
-                    st.success(
-                        "Progress report generated successfully."
-                    )
-
-                    st.info(
-                        "Open the downloaded HTML report → "
-                        "Print → Save as PDF."
-                    )
+            st.success(
+                "Complete PDF progress report generated successfully."
+            )
 
 
 # =========================================================
@@ -1431,7 +2113,6 @@ elif st.session_state.page == "teacher_dashboard":
     if not st.session_state.teacher_logged_in:
 
         st.session_state.page = "home"
-
         st.rerun()
 
     username = (
@@ -1450,28 +2131,20 @@ elif st.session_state.page == "teacher_dashboard":
         f"**Assigned Branch:** {teacher_branch}"
     )
 
-    if st.button(
-        "Logout"
-    ):
+    if st.button("Logout"):
 
         st.session_state.teacher_logged_in = False
-
         st.session_state.teacher_username = ""
-
         st.session_state.page = "home"
 
         st.rerun()
 
     st.divider()
 
-    # -----------------------------------------------
-    # LOAD REPORTS
-    # -----------------------------------------------
-
     if not os.path.exists(REPORT_PATH):
 
         st.info(
-            "No student reports are available yet."
+            "No student reports available."
         )
 
     else:
@@ -1489,14 +2162,14 @@ elif st.session_state.page == "teacher_dashboard":
         if reports.empty:
 
             st.info(
-                "No student reports are available yet."
+                "No student reports available."
             )
 
         else:
 
-            # -----------------------------------------
-            # BRANCH FILTER
-            # -----------------------------------------
+            # -------------------------------------------------
+            # BRANCH SECURITY FILTER
+            # -------------------------------------------------
 
             branch_reports = reports[
                 reports["Branch"].astype(str)
@@ -1504,28 +2177,23 @@ elif st.session_state.page == "teacher_dashboard":
             ].copy()
 
             st.header(
-                "Students in Your Branch"
+                "📋 Students in Your Branch"
             )
 
             if branch_reports.empty:
 
                 st.info(
-                    "No students from your branch "
-                    "have submitted reports."
+                    "No student reports found for this branch."
                 )
 
             else:
-
-                # -------------------------------------
-                # SUMMARY
-                # -------------------------------------
 
                 col1, col2, col3 = st.columns(3)
 
                 with col1:
 
                     st.metric(
-                        "Student Records",
+                        "Report Records",
                         len(branch_reports)
                     )
 
@@ -1540,18 +2208,18 @@ elif st.session_state.page == "teacher_dashboard":
 
                 with col3:
 
-                    avg = branch_reports[
+                    average = branch_reports[
                         "Overall_Percent"
                     ].mean()
 
                     st.metric(
                         "Average Performance",
-                        f"{avg:.1f}%"
+                        f"{average:.1f}%"
                     )
 
-                # -------------------------------------
-                # STUDENT SELECTION
-                # -------------------------------------
+                # -------------------------------------------------
+                # STUDENT
+                # -------------------------------------------------
 
                 student_ids = sorted(
                     branch_reports[
@@ -1573,9 +2241,17 @@ elif st.session_state.page == "teacher_dashboard":
 
                 if not student_data.empty:
 
-                    student_name = student_data[
-                        "Student_Name"
-                    ].iloc[0]
+                    student_name = str(
+                        student_data[
+                            "Student_Name"
+                        ].iloc[0]
+                    )
+
+                    semester = str(
+                        student_data[
+                            "Semester"
+                        ].iloc[0]
+                    )
 
                     st.header(
                         f"👤 {student_name}"
@@ -1587,18 +2263,16 @@ elif st.session_state.page == "teacher_dashboard":
                     )
 
                     st.write(
-                        f"**Semester:** "
-                        f"{student_data['Semester'].iloc[0]}"
+                        f"**Semester:** {semester}"
                     )
 
                     st.write(
-                        f"**Branch:** "
-                        f"{teacher_branch}"
+                        f"**Branch:** {teacher_branch}"
                     )
 
-                    # ---------------------------------
+                    # -------------------------------------------------
                     # TABLE
-                    # ---------------------------------
+                    # -------------------------------------------------
 
                     display_columns = [
                         "Subject",
@@ -1621,29 +2295,18 @@ elif st.session_state.page == "teacher_dashboard":
                         width="stretch"
                     )
 
-                    # ---------------------------------
-                    # AVERAGE
-                    # ---------------------------------
-
-                    overall_average = student_data[
-                        "Overall_Percent"
-                    ].mean()
-
-                    st.metric(
-                        "Student Overall Average",
-                        f"{overall_average:.1f}%"
-                    )
-
-                    # ---------------------------------
-                    # TEACHER REPORT
-                    # ---------------------------------
+                    # -------------------------------------------------
+                    # CREATE TEACHER PDF
+                    # -------------------------------------------------
 
                     subject_results = []
 
                     for _, row in student_data.iterrows():
 
                         level = str(
-                            row["Performance_Level"]
+                            row[
+                                "Performance_Level"
+                            ]
                         )
 
                         if "Low" in level:
@@ -1663,20 +2326,42 @@ elif st.session_state.page == "teacher_dashboard":
                             symbol = "🟢"
 
                         recs = recommendations(
-                            float(row["Attendance"]),
-                            float(row["Study_Hours"]),
-                            float(row["Internal_Mark"]),
-                            float(row["Assignment"]),
-                            float(row["Previous_Mark"])
+                            float(
+                                row["Attendance"]
+                            ),
+                            float(
+                                row["Study_Hours"]
+                            ),
+                            float(
+                                row["Internal_Mark"]
+                            ),
+                            float(
+                                row["Assignment"]
+                            ),
+                            float(
+                                row["Previous_Mark"]
+                            )
                         )
 
                         subject_results.append({
-                            "subject": row["Subject"],
-                            "attendance": row["Attendance"],
-                            "study_hours": row["Study_Hours"],
-                            "internal": row["Internal_Mark"],
-                            "assignment": row["Assignment"],
-                            "previous": row["Previous_Mark"],
+                            "subject": str(
+                                row["Subject"]
+                            ),
+                            "attendance": float(
+                                row["Attendance"]
+                            ),
+                            "study_hours": float(
+                                row["Study_Hours"]
+                            ),
+                            "internal": float(
+                                row["Internal_Mark"]
+                            ),
+                            "assignment": float(
+                                row["Assignment"]
+                            ),
+                            "previous": float(
+                                row["Previous_Mark"]
+                            ),
                             "level": level,
                             "symbol": symbol,
                             "overall": float(
@@ -1685,45 +2370,37 @@ elif st.session_state.page == "teacher_dashboard":
                             "recommendations": recs
                         })
 
-                    ml_results = {
-                        "prediction": str(
+                    teacher_pdf = create_pdf_report(
+                        student_name,
+                        selected_student,
+                        semester,
+                        teacher_branch,
+                        subject_results,
+                        str(
                             student_data[
                                 "ML_Prediction"
                             ].iloc[0]
                         ),
-                        "confidence": float(
+                        float(
                             student_data[
                                 "ML_Confidence"
                             ].iloc[0]
                         ),
-                        "cluster": int(
+                        int(
                             student_data[
                                 "Cluster"
                             ].iloc[0]
                         ),
-                        "accuracy": 0
-                    }
-
-                    teacher_html = create_html_report(
-                        student_name,
-                        selected_student,
-                        str(
-                            student_data[
-                                "Semester"
-                            ].iloc[0]
-                        ),
-                        teacher_branch,
-                        subject_results,
-                        ml_results
+                        0
                     )
 
                     st.download_button(
-                        label="📥 Download Student Progress Report",
-                        data=teacher_html,
+                        label="📥 Download Student Progress Report PDF",
+                        data=teacher_pdf,
                         file_name=(
                             f"{selected_student}_"
-                            "Teacher_Report.html"
+                            f"{semester}_Teacher_Report.pdf"
                         ),
-                        mime="text/html",
+                        mime="application/pdf",
                         width="stretch"
                     )
