@@ -20,23 +20,23 @@ st.set_page_config(
 
 
 # =========================================================
-# LOAD DATASET
+# TITLE
+# =========================================================
+
+st.title("🎓 Student Performance Prediction")
+
+
+# =========================================================
+# LOAD DATA
 # =========================================================
 
 @st.cache_data
 def load_data():
-
-    return pd.read_csv(
-        "data/student_performance.csv"
-    )
+    return pd.read_csv("data/student_performance.csv")
 
 
 data = load_data()
 
-
-# =========================================================
-# FEATURES
-# =========================================================
 
 FEATURES = [
     "Attendance",
@@ -46,27 +46,27 @@ FEATURES = [
     "Previous_Mark"
 ]
 
-REQUIRED_COLUMNS = FEATURES + ["Performance"]
+
+required_columns = FEATURES + ["Performance"]
 
 
-missing_columns = [
-    column
-    for column in REQUIRED_COLUMNS
-    if column not in data.columns
+missing = [
+    col for col in required_columns
+    if col not in data.columns
 ]
 
 
-if missing_columns:
+if missing:
 
     st.error(
-        f"Missing columns in dataset: {missing_columns}"
+        f"Missing columns in dataset: {missing}"
     )
 
     st.stop()
 
 
 # =========================================================
-# K-MEANS CLUSTERING
+# K-MEANS
 # =========================================================
 
 scaler = StandardScaler()
@@ -127,50 +127,140 @@ accuracy = accuracy_score(
 
 
 # =========================================================
-# TITLE
+# STUDENT LOGIN
 # =========================================================
 
-st.title(
-    "🎓 Student Performance Prediction System"
-)
+st.header("🔐 Student Login")
 
 st.write(
-    "B.Tech S3 – AI & Data Science"
+    "Enter your details to access your Student Dashboard."
 )
 
-st.write(
-    "K-Means Clustering + Random Forest Classification"
+
+student_name = st.text_input(
+    "Student Name"
 )
 
-st.divider()
+
+university_id = st.text_input(
+    "University ID"
+)
+
+
+dob = st.text_input(
+    "Date of Birth",
+    placeholder="DDMM"
+)
+
+
+password = st.text_input(
+    "Password",
+    type="password",
+    placeholder="Example: ARU*BTECH1508"
+)
 
 
 # =========================================================
-# ROLE SELECTION
+# LOGIN BUTTON
 # =========================================================
 
-role = st.selectbox(
-    "Select Dashboard",
-    [
-        "Student Dashboard",
-        "Teacher Dashboard"
-    ]
-)
+if st.button(
+    "🔓 Student Login",
+    type="primary",
+    width="stretch"
+):
+
+    # -----------------------------------------------
+    # CREATE EXPECTED PASSWORD
+    # -----------------------------------------------
+
+    name_clean = (
+        student_name
+        .strip()
+        .replace(" ", "")
+    )
+
+    if len(name_clean) < 3:
+
+        st.error(
+            "Student name must contain at least 3 letters."
+        )
+
+        st.stop()
+
+
+    first_three = name_clean[:3].upper()
+
+
+    dob_clean = (
+        dob
+        .strip()
+        .replace("/", "")
+        .replace("-", "")
+    )
+
+
+    expected_password = (
+        first_three
+        + "*BTECH"
+        + dob_clean
+    )
+
+
+    # -----------------------------------------------
+    # CHECK PASSWORD
+    # -----------------------------------------------
+
+    if (
+        university_id
+        and student_name
+        and dob
+        and password == expected_password
+    ):
+
+        st.session_state[
+            "student_logged_in"
+        ] = True
+
+        st.session_state[
+            "student_name"
+        ] = student_name
+
+        st.session_state[
+            "university_id"
+        ] = university_id
+
+        st.session_state[
+            "student_dob"
+        ] = dob
+
+
+    else:
+
+        st.error(
+            "Invalid Student Name, University ID, "
+            "DOB or Password."
+        )
 
 
 # =========================================================
 # STUDENT DASHBOARD
 # =========================================================
 
-if role == "Student Dashboard":
+if st.session_state.get(
+    "student_logged_in",
+    False
+):
+
+    st.divider()
 
     st.header(
         "👨‍🎓 Student Dashboard"
     )
 
-    st.info(
-        "Enter your student information and academic "
-        "details for each subject."
+
+    st.success(
+        f"Welcome, {st.session_state['student_name']}!"
     )
 
 
@@ -182,17 +272,24 @@ if role == "Student Dashboard":
         "👤 Student Information"
     )
 
+
     col1, col2 = st.columns(2)
+
 
     with col1:
 
-        student_name = st.text_input(
-            "Student Name"
+        st.write(
+            f"**Student Name:** "
+            f"{st.session_state['student_name']}"
         )
 
-        university_id = st.text_input(
-            "University ID"
+        st.write(
+            f"**University ID:** "
+            f"{st.session_state['university_id']}"
         )
+
+
+    with col2:
 
         semester = st.selectbox(
             "Semester",
@@ -208,8 +305,6 @@ if role == "Student Dashboard":
             ]
         )
 
-
-    with col2:
 
         branch = st.selectbox(
             "Branch",
@@ -236,7 +331,9 @@ if role == "Student Dashboard":
         "📚 Six Subjects"
     )
 
+
     subject_names = []
+
 
     subject_columns = st.columns(3)
 
@@ -259,15 +356,16 @@ if role == "Student Dashboard":
 
 
     # -----------------------------------------------------
-    # ACADEMIC INFORMATION
+    # SUBJECT ACADEMIC INFORMATION
     # -----------------------------------------------------
 
     st.subheader(
         "📊 Academic Information"
     )
 
+
     st.write(
-        "Enter the following details separately for each subject."
+        "Enter academic information separately for each subject."
     )
 
 
@@ -295,18 +393,18 @@ if role == "Student Dashboard":
 
             attendance = st.number_input(
                 "Attendance (%)",
-                min_value=0.0,
-                max_value=100.0,
-                value=80.0,
+                0.0,
+                100.0,
+                80.0,
                 key=f"attendance_{i}"
             )
 
 
             study_hours = st.number_input(
                 "Study Hours / Day",
-                min_value=0.0,
-                max_value=24.0,
-                value=3.0,
+                0.0,
+                24.0,
+                3.0,
                 key=f"study_{i}"
             )
 
@@ -315,18 +413,18 @@ if role == "Student Dashboard":
 
             internal = st.number_input(
                 "Internal Mark",
-                min_value=0.0,
-                max_value=100.0,
-                value=65.0,
+                0.0,
+                100.0,
+                65.0,
                 key=f"internal_{i}"
             )
 
 
             assignment = st.number_input(
                 "Assignment Score",
-                min_value=0.0,
-                max_value=100.0,
-                value=70.0,
+                0.0,
+                100.0,
+                70.0,
                 key=f"assignment_{i}"
             )
 
@@ -335,9 +433,9 @@ if role == "Student Dashboard":
 
             previous = st.number_input(
                 "Previous Mark",
-                min_value=0.0,
-                max_value=100.0,
-                value=65.0,
+                0.0,
+                100.0,
+                65.0,
                 key=f"previous_{i}"
             )
 
@@ -358,63 +456,39 @@ if role == "Student Dashboard":
 
 
     # -----------------------------------------------------
-    # PREDICTION BUTTON
+    # PREDICTION
     # -----------------------------------------------------
 
     if st.button(
-        "🔮 Predict Performance for All Subjects",
+        "🔮 Predict Performance",
         type="primary",
         width="stretch"
     ):
 
 
-        if not student_name:
-
-            st.warning(
-                "Please enter Student Name."
-            )
-
-            st.stop()
-
-
-        if not university_id:
-
-            st.warning(
-                "Please enter University ID."
-            )
-
-            st.stop()
-
-
         results = []
 
-
-        # -------------------------------------------------
-        # PREDICT EACH SUBJECT SEPARATELY
-        # -------------------------------------------------
 
         for subject_data in subject_inputs:
 
 
             input_data = pd.DataFrame(
-                [
-                    {
-                        "Attendance":
-                            subject_data["Attendance"],
+                [{
+                    "Attendance":
+                        subject_data["Attendance"],
 
-                        "Study_Hours":
-                            subject_data["Study_Hours"],
+                    "Study_Hours":
+                        subject_data["Study_Hours"],
 
-                        "Internal_Mark":
-                            subject_data["Internal_Mark"],
+                    "Internal_Mark":
+                        subject_data["Internal_Mark"],
 
-                        "Assignment":
-                            subject_data["Assignment"],
+                    "Assignment":
+                        subject_data["Assignment"],
 
-                        "Previous_Mark":
-                            subject_data["Previous_Mark"]
-                    }
-                ]
+                    "Previous_Mark":
+                        subject_data["Previous_Mark"]
+                }]
             )
 
 
@@ -471,51 +545,16 @@ if role == "Student Dashboard":
 
 
         # -------------------------------------------------
-        # STUDENT INFORMATION
+        # RESULTS
         # -------------------------------------------------
 
         st.success(
-            "Performance prediction completed!"
+            "✅ Prediction completed!"
         )
 
 
         st.subheader(
-            "👤 Student Information"
-        )
-
-
-        student_info = pd.DataFrame(
-            {
-                "Information": [
-                    "Student Name",
-                    "University ID",
-                    "Semester",
-                    "Branch"
-                ],
-
-                "Value": [
-                    student_name,
-                    university_id,
-                    semester,
-                    branch
-                ]
-            }
-        )
-
-
-        st.dataframe(
-            student_info,
-            width="stretch",
-            hide_index=True
-        )
-
-
-        # -------------------------------------------------
-        # SUBJECT-WISE RESULTS
-        # -------------------------------------------------
-
-        st.subheader(
-            "📊 Subject-wise Performance Prediction"
+            "📊 Subject-wise Prediction"
         )
 
 
@@ -527,36 +566,31 @@ if role == "Student Dashboard":
 
 
         # -------------------------------------------------
-        # INDIVIDUAL SUBJECT RESULTS
+        # INDIVIDUAL RESULTS
         # -------------------------------------------------
 
         st.subheader(
-            "📚 Individual Subject Results"
+            "📚 Subject Results"
         )
 
 
         for result in results:
 
-            prediction = result[
-                "Prediction"
-            ]
-
-
-            if prediction == "High":
+            if result["Prediction"] == "High":
 
                 st.success(
                     f"📗 {result['Subject']} → "
-                    f"High Performance "
-                    f"({result['Confidence (%)']}% confidence)"
+                    f"High Performance | "
+                    f"{result['Confidence (%)']}% confidence"
                 )
 
 
-            elif prediction == "Medium":
+            elif result["Prediction"] == "Medium":
 
                 st.warning(
                     f"📙 {result['Subject']} → "
-                    f"Medium Performance "
-                    f"({result['Confidence (%)']}% confidence)"
+                    f"Medium Performance | "
+                    f"{result['Confidence (%)']}% confidence"
                 )
 
 
@@ -564,8 +598,8 @@ if role == "Student Dashboard":
 
                 st.error(
                     f"📕 {result['Subject']} → "
-                    f"Low Performance "
-                    f"({result['Confidence (%)']}% confidence)"
+                    f"Low Performance | "
+                    f"{result['Confidence (%)']}% confidence"
                 )
 
 
@@ -574,7 +608,7 @@ if role == "Student Dashboard":
         # -------------------------------------------------
 
         st.subheader(
-            "💡 Academic Recommendation"
+            "💡 Recommendation"
         )
 
 
@@ -591,8 +625,7 @@ if role == "Student Dashboard":
         if low_subjects:
 
             st.error(
-                "Additional academic attention is "
-                "recommended for: "
+                "Focus on: "
                 + ", ".join(low_subjects)
             )
 
@@ -600,7 +633,7 @@ if role == "Student Dashboard":
         elif medium_subjects:
 
             st.warning(
-                "Consider improving academic performance in: "
+                "Consider improving: "
                 + ", ".join(medium_subjects)
             )
 
@@ -608,226 +641,27 @@ if role == "Student Dashboard":
         else:
 
             st.success(
-                "Excellent! All subjects are predicted "
-                "at High performance level."
+                "Excellent performance predicted "
+                "for all subjects!"
             )
 
 
-        st.caption(
-            "The predictions are machine-learning estimates "
-            "and should be used as academic guidance."
-        )
+    # -----------------------------------------------------
+    # LOGOUT
+    # -----------------------------------------------------
 
-
-# =========================================================
-# TEACHER DASHBOARD
-# =========================================================
-
-else:
-
-    st.header(
-        "👩‍🏫 Teacher Dashboard"
-    )
-
-    st.info(
-        "Teacher access is required to view the student dataset."
-    )
-
-
-    username = st.text_input(
-        "Teacher Username"
-    )
-
-
-    password = st.text_input(
-        "Teacher Password",
-        type="password"
-    )
+    st.divider()
 
 
     if st.button(
-        "🔐 Teacher Login",
-        type="primary"
+        "Logout"
     ):
 
-        if (
-            username == "teacher"
-            and password == "teacher123"
-        ):
+        st.session_state[
+            "student_logged_in"
+        ] = False
 
-            st.session_state[
-                "teacher_logged_in"
-            ] = True
-
-        else:
-
-            st.error(
-                "Invalid username or password."
-            )
-
-
-    if st.session_state.get(
-        "teacher_logged_in",
-        False
-    ):
-
-
-        st.success(
-            "Teacher login successful."
-        )
-
-
-        st.divider()
-
-
-        # -------------------------------------------------
-        # STATISTICS
-        # -------------------------------------------------
-
-        st.subheader(
-            "📊 Student Statistics"
-        )
-
-
-        total_students = len(data)
-
-
-        high_count = len(
-            data[
-                data["Performance"] == "High"
-            ]
-        )
-
-
-        medium_count = len(
-            data[
-                data["Performance"] == "Medium"
-            ]
-        )
-
-
-        low_count = len(
-            data[
-                data["Performance"] == "Low"
-            ]
-        )
-
-
-        col1, col2, col3, col4 = st.columns(4)
-
-
-        with col1:
-
-            st.metric(
-                "Total Students",
-                total_students
-            )
-
-
-        with col2:
-
-            st.metric(
-                "High",
-                high_count
-            )
-
-
-        with col3:
-
-            st.metric(
-                "Medium",
-                medium_count
-            )
-
-
-        with col4:
-
-            st.metric(
-                "Low",
-                low_count
-            )
-
-
-        st.divider()
-
-
-        # -------------------------------------------------
-        # MODEL PERFORMANCE
-        # -------------------------------------------------
-
-        st.subheader(
-            "🤖 Model Performance"
-        )
-
-
-        st.metric(
-            "Random Forest Accuracy",
-            f"{accuracy * 100:.2f}%"
-        )
-
-
-        st.write(
-            "K-Means Clusters: **3**"
-        )
-
-
-        st.divider()
-
-
-        # -------------------------------------------------
-        # DATASET
-        # -------------------------------------------------
-
-        st.subheader(
-            "📋 Student Dataset"
-        )
-
-
-        st.dataframe(
-            data,
-            width="stretch",
-            hide_index=True
-        )
-
-
-        st.divider()
-
-
-        # -------------------------------------------------
-        # PERFORMANCE CHART
-        # -------------------------------------------------
-
-        st.subheader(
-            "📈 Performance Distribution"
-        )
-
-
-        performance_counts = (
-            data["Performance"]
-            .value_counts()
-            .rename_axis("Performance")
-            .reset_index(
-                name="Students"
-            )
-        )
-
-
-        st.bar_chart(
-            performance_counts.set_index(
-                "Performance"
-            )
-        )
-
-
-        if st.button(
-            "Logout"
-        ):
-
-            st.session_state[
-                "teacher_logged_in"
-            ] = False
-
-            st.rerun()
+        st.rerun()
 
 
 # =========================================================
@@ -837,6 +671,5 @@ else:
 st.divider()
 
 st.caption(
-    "Student Performance Prediction using "
-    "K-Means Clustering and Random Forest"
+    "Student Performance Prediction System"
 )
