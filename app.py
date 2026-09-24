@@ -161,6 +161,7 @@ REPORT_COLUMNS = [
 DEFAULT_STATE = {
     "page": "home", "logged_in": False, "role": None, "username": None,
     "teacher_department": None, "student_report": None,
+    "dashboard_view": "department",
 }
 for key, value in DEFAULT_STATE.items():
     if key not in st.session_state:
@@ -580,6 +581,129 @@ def create_kmeans_pdf(cluster_result):
     buffer.seek(0)
     return buffer.getvalue()
 
+
+# ============================================================
+# ALL-DEPARTMENT ANALYSIS
+# ============================================================
+def build_all_department_analysis():
+    df = load_reports()
+    if df.empty:
+        return pd.DataFrame(), pd.DataFrame(), 0.0
+
+    rows = []
+    for _, row in df.iterrows():
+        try:
+            subjects = parse_subjects(row["Subjects_JSON"])
+        except Exception:
+            subjects = []
+        if not subjects:
+            continue
+        scores = [float(x.get("Overall", 0)) for x in subjects]
+        attendance = [float(x.get("Attendance", 0)) for x in subjects]
+        internal = [float(x.get("Internal", 0)) for x in subjects]
+        rows.append({
+            "Department": str(row.get("Department", "Unknown")),
+            "Semester": str(row.get("Semester", "Unknown")),
+            "University_ID": str(row.get("University_ID", "")),
+            "Student_Name": str(row.get("Student_Name", "")),
+            "Overall": float(np.mean(scores)),
+            "Attendance": float(np.mean(attendance)),
+            "Internal": float(np.mean(internal)),
+        })
+    records = pd.DataFrame(rows)
+    if records.empty:
+        return records, pd.DataFrame(), 0.0
+
+    summary = records.groupby("Department", as_index=False).agg(
+        Students=("University_ID", "nunique"),
+        Average_Overall=("Overall", "mean"),
+        Average_Attendance=("Attendance", "mean"),
+        Average_Internal=("Internal", "mean"),
+    ).sort_values("Average_Overall", ascending=False)
+    return records, summary, float(records["Overall"].mean())
+
+
+def create_all_department_pdf(records, summary, overall_average):
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=28, leftMargin=28, topMargin=28, bottomMargin=28)
+    styles = getSampleStyleSheet()
+    title = ParagraphStyle("all_title", parent=styles["Title"], alignment=TA_CENTER, fontSize=18, spaceAfter=12)
+    story = [Paragraph("EduPredict SPP — All Department Analysis", title)]
+    if records.empty:
+        story.append(Paragraph("No student records are available for analysis.", styles["Normal"]))
+    else:
+        story.append(Paragraph(f"<b>Total student records:</b> {len(records)}", styles["Normal"]))
+        story.append(Paragraph(f"<b>Overall average performance:</b> {overall_average:.2f}%", styles["Normal"]))
+        story.append(Spacer(1, 10))
+        story.append(Paragraph("Department Summary", styles["Heading2"]))
+        data = [["Department", "Students", "Avg Score", "Avg Attendance", "Avg Internal"]]
+        for _, r in summary.iterrows():
+            data.append([str(r["Department"]), str(int(r["Students"])), f"{r['Average_Overall']:.2f}%", f"{r['Average_Attendance']:.2f}%", f"{r['Average_Internal']:.2f}/40"])
+        t = Table(data, repeatRows=1, colWidths=[210,55,65,75,65])
+        t.setStyle(TableStyle([("BACKGROUND",(0,0),(-1,0),colors.HexColor("#172554")),("TEXTCOLOR",(0,0),(-1,0),colors.white),("GRID",(0,0),(-1,-1),0.4,colors.grey),("FONTSIZE",(0,0),(-1,-1),7),("VALIGN",(0,0),(-1,-1),"MIDDLE")]))
+        story.append(t)
+        story.append(Spacer(1, 12))
+        story.append(Paragraph("Student-level Overview", styles["Heading2"]))
+        student_data = [["Department", "Semester", "University ID", "Student", "Score"]]
+        for _, r in records.sort_values(["Department", "Semester", "Student_Name"]).iterrows():
+            student_data.append([str(r["Department"]), str(r["Semester"]), str(r["University_ID"]), str(r["Student_Name"]), f"{r['Overall']:.2f}%"])
+        st = Table(student_data, repeatRows=1, colWidths=[145,45,70,150,45])
+        st.setStyle(TableStyle([("BACKGROUND",(0,0),(-1,0),colors.HexColor("#334155")),("TEXTCOLOR",(0,0),(-1,0),colors.white),("GRID",(0,0),(-1,-1),0.3,colors.grey),("FONTSIZE",(0,0),(-1,-1),6.5)]))
+        story.append(st)
+        story.append(Spacer(1, 12))
+        story.append(Paragraph("This report is an academic dashboard analysis based on records entered into EduPredict SPP. Performance indicators are project-defined and are not official university grades.", styles["Italic"]))
+    doc.build(story)
+    buffer.seek(0)
+    return buffer.getvalue()
+
+
+def all_department_dashboard():
+    app_brand()
+    st.title("🌐 All Department Analysis Dashboard")
+    st.caption("Combined academic overview of all departments and semesters stored in the application.")
+
+    c1, c2 = st.columns([1, 1])
+    if c1.button("⬅️ Back to Tutor Dashboard", use_container_width=True):
+        st.session_state.dashboard_view = "department"
+        st.session_state.page = "teacher_dashboard"
+        st.rerun()
+    if c2.button("🚪 Logout", use_container_width=True):
+        logout()
+
+    records, summary, overall_average = build_all_department_analysis()
+    if records.empty:
+        st.info("No student records are available yet. Add student records from the Tutor Dashboard first.")
+        return
+
+    a, b, c = st.columns(3)
+    a.metric("Total Students", int(records["University_ID"].nunique()))
+    b.metric("Departments", int(records["Department"].nunique()))
+    c.metric("Overall Average", f"{overall_average:.2f}%")
+
+    st.subheader("📊 Department-wise Analysis")
+    display_summary = summary.copy()
+    display_summary["Average_Overall"] = display_summary["Average_Overall"].map(lambda x: f"{x:.2f}%")
+    display_summary["Average_Attendance"] = display_summary["Average_Attendance"].map(lambda x: f"{x:.2f}%")
+    display_summary["Average_Internal"] = display_summary["Average_Internal"].map(lambda x: f"{x:.2f}/40")
+    st.dataframe(display_summary, use_container_width=True, hide_index=True)
+
+    st.subheader("👥 All Student Analysis")
+    display_records = records.copy()
+    display_records["Overall"] = display_records["Overall"].map(lambda x: f"{x:.2f}%")
+    display_records["Attendance"] = display_records["Attendance"].map(lambda x: f"{x:.2f}%")
+    display_records["Internal"] = display_records["Internal"].map(lambda x: f"{x:.2f}/40")
+    st.dataframe(display_records, use_container_width=True, hide_index=True)
+
+    pdf = create_all_department_pdf(records, summary, overall_average)
+    st.download_button(
+        "📥 Download All Department Analysis PDF",
+        pdf,
+        "All_Department_Analysis.pdf",
+        "application/pdf",
+        use_container_width=True,
+        type="primary",
+    )
+
 # ============================================================
 # CSV TEMPLATE / IMPORT
 # ============================================================
@@ -902,9 +1026,13 @@ def teacher_dashboard():
         index=2,
         key="dashboard_semester",
     )
-    if c3.button("🚪 Logout", use_container_width=True):
-        logout()
-
+    if c3.button("➡️ Next Dashboard", use_container_width=True):
+        st.session_state.dashboard_view = "all_departments"
+        st.session_state.page = "all_department_analysis"
+        st.rerun()
+    
+    st.caption("Next Dashboard: combined analysis for all departments and semesters.")
+    
     subjects = get_subjects(department, semester)
     if len(subjects) != 6:
         st.error(
@@ -1106,6 +1234,8 @@ elif st.session_state.page == "student_login":
     student_login()
 elif st.session_state.page == "teacher_dashboard" and st.session_state.logged_in and st.session_state.role == "teacher":
     teacher_dashboard()
+elif st.session_state.page == "all_department_analysis" and st.session_state.logged_in and st.session_state.role == "teacher":
+    all_department_dashboard()
 elif st.session_state.page == "student_dashboard" and st.session_state.logged_in and st.session_state.role == "student":
     student_dashboard()
 else:
