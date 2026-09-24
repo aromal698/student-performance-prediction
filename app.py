@@ -40,22 +40,10 @@ DEPARTMENTS = [
     "Artificial Intelligence and Data Science",
     "Artificial Intelligence and Machine Learning",
     "Information Technology",
-    "Computer Science and Engineering (AI)",
-    "Computer Science and Engineering (Data Science)",
-    "Computer Science and Engineering (Cyber Security)",
     "Electronics and Communication Engineering",
     "Electrical and Electronics Engineering",
-    "Electronics and Instrumentation Engineering",
     "Civil Engineering",
     "Mechanical Engineering",
-    "Automobile Engineering",
-    "Aeronautical Engineering",
-    "Biomedical Engineering",
-    "Chemical Engineering",
-    "Food Technology",
-    "Biotechnology",
-    "Mechatronics Engineering",
-    "Robotics and Automation",
 ]
 
 # -----------------------------------------------------------------
@@ -825,34 +813,9 @@ def kmeans_analysis(department):
 # ============================================================
 # TUTOR WORKFLOW
 # ============================================================
-def manual_add_form():
+def manual_add_form(department, semester):
     st.subheader("➕ Add One Student")
-    st.caption("Select the B.Tech Department and Semester first. The subject list updates automatically for that exact combination.")
-
-    # These controls are deliberately OUTSIDE st.form so Streamlit reruns
-    # immediately when Semester or Department changes.
-    sel1, sel2 = st.columns(2)
-    default_department = st.session_state.get("active_department", st.session_state.get("teacher_department"))
-    if default_department not in DEPARTMENTS:
-        default_department = DEPARTMENTS[0]
-
-    department = sel1.selectbox(
-        "B.Tech Department",
-        DEPARTMENTS,
-        index=DEPARTMENTS.index(default_department),
-        key="manual_department_selector",
-        help="Choose the student's B.Tech department."
-    )
-    semester = sel2.selectbox(
-        "B.Tech Semester",
-        SEMESTERS,
-        index=2,
-        key="manual_semester_selector",
-        help="Choose the student's semester."
-    )
-
-    # Keep dashboard context synchronized with the current selection.
-    st.session_state.active_department = department
+    st.caption("Subjects are controlled by the Department + Semester selected at the top of the Tutor Dashboard.")
 
     subjects = get_subjects(department, semester)
     if not subjects:
@@ -916,83 +879,131 @@ def manual_add_form():
 
 def teacher_dashboard():
     app_brand()
-    assigned_department = st.session_state.teacher_department
-    department = st.selectbox(
-        "Active Department",
-        DEPARTMENTS,
-        index=DEPARTMENTS.index(st.session_state.get("active_department", assigned_department)) if st.session_state.get("active_department", assigned_department) in DEPARTMENTS else 0,
-        key="active_department"
-    )
-    c1, c2 = st.columns([5, 1])
-    c1.title("👨‍🏫 Tutor Dashboard")
-    c2.button("🚪 Logout", on_click=logout, use_container_width=True)
-    st.info(f"Tutor account: **{assigned_department}**  •  Active department: **{department}**")
+    assigned_department = st.session_state.get("teacher_department")
+    if assigned_department not in DEPARTMENTS:
+        assigned_department = DEPARTMENTS[0]
 
-    tab1, tab2, tab3, tab4 = st.tabs(["➕ Add Student", "📤 Upload CSV", "👥 Student Records", "📈 K-Means Analysis"])
+    st.title("👨‍🏫 Tutor Dashboard")
+    st.info(f"Tutor account department: **{assigned_department}**")
+
+    # IMPORTANT: these selectors are outside every form/tab. Streamlit reruns
+    # immediately when either value changes, so the subject list always follows
+    # the selected B.Tech department + semester.
+    c1, c2, c3 = st.columns([2.2, 1.0, 0.7])
+    department = c1.selectbox(
+        "🎓 B.Tech Department",
+        DEPARTMENTS,
+        index=DEPARTMENTS.index(assigned_department),
+        key="dashboard_department",
+    )
+    semester = c2.selectbox(
+        "📚 Semester",
+        SEMESTERS,
+        index=2,
+        key="dashboard_semester",
+    )
+    if c3.button("🚪 Logout", use_container_width=True):
+        logout()
+
+    subjects = get_subjects(department, semester)
+    if len(subjects) != 6:
+        st.error(
+            f"No complete 6-subject mapping is configured for **{department} — {semester}**. "
+            "The Tutor Dashboard will not accept marks until all 6 subjects are mapped."
+        )
+        return
+
+    st.success(f"📖 Active curriculum: **{department} — {semester}**")
+    st.dataframe(
+        pd.DataFrame({"No.": range(1, 7), "Subject": subjects}),
+        use_container_width=True, hide_index=True
+    )
+
+    tab1, tab2, tab3, tab4 = st.tabs([
+        "➕ Add Student", "📤 Upload CSV", "👥 Student Records", "📈 K-Means Analysis"
+    ])
 
     with tab1:
-        manual_add_form()
+        manual_add_form(department, semester)
 
     with tab2:
-        st.subheader("Upload Multiple Students")
-        st.write("Semester and department determine the subject list. The Department column in the CSV is ignored and replaced with the tutor's assigned department.")
+        st.subheader("📤 Upload Students")
+        st.write(
+            "Each CSV row can specify its own Semester. The app ignores manually supplied subject names and "
+            "loads the six subjects from the selected B.Tech Department + that row's Semester."
+        )
         template = template_df().to_csv(index=False).encode("utf-8")
         st.download_button("📄 Download CSV Template", template, "student_marks_template.csv", "text/csv")
-        uploaded = st.file_uploader("Choose CSV", type=["csv"])
+        uploaded = st.file_uploader("Choose CSV", type=["csv"], key="student_csv_upload")
         if uploaded is not None and st.button("🚀 Submit Uploaded Students", type="primary"):
             try:
                 reports = uploaded_to_reports(uploaded, department)
-                for report in reports:
-                    upsert_report(report)
-                st.success(f"✅ {len(reports)} student record(s) uploaded successfully.")
+                if not reports:
+                    st.warning("No valid student rows were found in the CSV.")
+                else:
+                    for report in reports:
+                        upsert_report(report)
+                    st.success(f"✅ {len(reports)} student record(s) uploaded successfully.")
             except Exception as exc:
                 st.error(f"Upload failed: {exc}")
 
     with tab3:
         df = load_reports()
-        branch_df = df[df["Department"].astype(str).eq(str(department))].copy()
-        st.subheader(f"Student Records — {len(branch_df)}")
-        if branch_df.empty:
-            st.info("No student records yet.")
-            return
-
-        show = branch_df[["Username", "Student_Name", "University_ID", "Semester", "Department", "Created_Time"]]
-        st.dataframe(show, use_container_width=True, hide_index=True)
-
-        ids = show["University_ID"].astype(str).tolist()
-        selected = st.selectbox("Select University ID", ids)
-        row = branch_df[branch_df["University_ID"].astype(str).eq(str(selected))].iloc[0].to_dict()
-        subs = parse_subjects(row["Subjects_JSON"])
-        overall = float(np.mean([x["Overall"] for x in subs])) if subs else 0
-        st.metric("Selected Student Overall", f"{overall:.2f}%")
-
-        rows = [[x["Subject"], x["Attendance"], x["Internal"], x["Assignment"], x["Previous"], x["Overall"], x["Level"]] for x in subs]
-        st.dataframe(pd.DataFrame(rows, columns=["Subject", "Attendance", "Internal", "Assignment", "Previous", "Score", "Performance"]), use_container_width=True, hide_index=True)
-
-        c1, c2 = st.columns(2)
-        c1.download_button("📥 Download Student PDF", create_pdf(row), f"{selected}_Progress_Report.pdf", "application/pdf", use_container_width=True)
-        if c2.button("🗑️ Delete Selected Student", use_container_width=True):
-            delete_student(selected, department)
-            st.success("Student deleted.")
-            st.rerun()
+        filtered = df[
+            df["Department"].astype(str).eq(str(department)) &
+            df["Semester"].astype(str).str.upper().eq(str(semester).upper())
+        ].copy()
+        st.subheader(f"Student Records — {department} — {semester} ({len(filtered)})")
+        if filtered.empty:
+            st.info("No student records for this Department + Semester yet.")
+        else:
+            show = filtered[["Username", "Student_Name", "University_ID", "Semester", "Department", "Created_Time"]]
+            st.dataframe(show, use_container_width=True, hide_index=True)
+            ids = show["University_ID"].astype(str).tolist()
+            selected = st.selectbox("Select University ID", ids, key="record_student_id")
+            row = filtered[filtered["University_ID"].astype(str).eq(str(selected))].iloc[0].to_dict()
+            subs = parse_subjects(row["Subjects_JSON"])
+            overall = float(np.mean([x["Overall"] for x in subs])) if subs else 0.0
+            st.metric("Selected Student Overall", f"{overall:.2f}%")
+            rows = [[x["Subject"], x["Attendance"], x["Internal"], x["Assignment"], x["Previous"], x["Overall"], x["Level"]] for x in subs]
+            st.dataframe(pd.DataFrame(rows, columns=["Subject", "Attendance", "Internal", "Assignment", "Previous", "Score", "Performance"]), use_container_width=True, hide_index=True)
+            c1, c2 = st.columns(2)
+            c1.download_button("📥 Download Student PDF", create_pdf(row), f"{selected}_Progress_Report.pdf", "application/pdf", use_container_width=True)
+            if c2.button("🗑️ Delete Selected Student", use_container_width=True):
+                delete_student(selected, department)
+                st.success("Student deleted.")
+                st.rerun()
 
     with tab4:
-        st.subheader("📈 Tutor Performance Analysis — K-Means")
-        st.write("K-Means groups the available student-subject records using attendance mark, internal, assignment, previous mark and study hours.")
+        st.subheader(f"📈 K-Means Analysis — {department} — {semester}")
         result = kmeans_analysis(department)
         if not result.get("available"):
             st.warning(result.get("message", "Analysis unavailable."))
         else:
-            st.metric("Subject records analysed", result["n_samples"])
-            st.metric("Clusters", result["k"])
+            # Show only the selected semester in the analysis table when possible.
+            records = result["records"].copy()
+            semester_students = load_reports()
+            ids_for_sem = set(semester_students[
+                semester_students["Department"].astype(str).eq(str(department)) &
+                semester_students["Semester"].astype(str).str.upper().eq(str(semester).upper())
+            ]["University_ID"].astype(str))
+            selected_records = records[records["University_ID"].astype(str).isin(ids_for_sem)].copy()
+            st.metric("Subject records in selected semester", len(selected_records))
+            if selected_records.empty:
+                st.info("No records for the selected Department + Semester. Add students first.")
+            else:
+                st.dataframe(selected_records, use_container_width=True, hide_index=True)
+            st.caption(f"K-Means is calculated from all available records in the selected department. Inertia: {result['inertia']:.4f}")
+            st.markdown("### Cluster summary")
             st.dataframe(pd.DataFrame(result["summary"]), use_container_width=True, hide_index=True)
-            st.markdown("### Cluster centroids / calculations")
+            st.markdown("### Cluster centroids")
             st.dataframe(pd.DataFrame(result["centroids"]), use_container_width=True, hide_index=True)
-            st.markdown("### Subject records with cluster")
-            display = result["records"].copy()
-            st.dataframe(display, use_container_width=True, hide_index=True)
-            st.caption(f"K-Means inertia: {result['inertia']:.4f} • Features: {', '.join(result['features'])}")
-            st.download_button("📊 Download K-Means Analysis PDF", create_kmeans_pdf(result), f"{department.replace(' ', '_')}_KMeans_Analysis.pdf", "application/pdf", use_container_width=True, type="primary")
+            st.download_button(
+                "📊 Download K-Means Analysis PDF",
+                create_kmeans_pdf(result),
+                f"{department.replace(' ', '_')}_KMeans_Analysis.pdf",
+                "application/pdf", use_container_width=True, type="primary"
+            )
 
 # ============================================================
 # STUDENT WORKFLOW
@@ -1078,6 +1089,11 @@ def student_dashboard():
             use_container_width=True,
             type="primary",
         )
+
+# Clear obsolete widget keys from earlier versions if they exist.
+for _old_key in ("active_department", "manual_department_selector", "manual_semester_selector"):
+    if _old_key in st.session_state:
+        del st.session_state[_old_key]
 
 # ============================================================
 # ROUTER
