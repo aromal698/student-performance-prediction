@@ -24,7 +24,7 @@ from reportlab.platypus import (
 
 
 # ============================================================
-# PAGE CONFIG
+# 1. PAGE CONFIGURATION
 # ============================================================
 
 st.set_page_config(
@@ -36,7 +36,7 @@ st.set_page_config(
 
 
 # ============================================================
-# DATA FILE
+# 2. FILE SETTINGS
 # ============================================================
 
 DATA_FOLDER = "data"
@@ -47,15 +47,15 @@ DATA_FILE = os.path.join(
 
 
 # ============================================================
-# BRANCHES
+# 3. DEPARTMENTS
 # ============================================================
 
-BRANCHES = [
+DEPARTMENTS = [
     "Artificial Intelligence and Data Science",
     "Computer Science and Engineering",
     "Computer Science and Engineering (Artificial Intelligence)",
-    "Computer Science and Engineering (Cyber Security)",
     "Computer Science and Engineering (Data Science)",
+    "Computer Science and Engineering (Cyber Security)",
     "Artificial Intelligence and Machine Learning",
     "Information Technology",
     "Electronics and Communication Engineering",
@@ -80,7 +80,7 @@ BRANCHES = [
 
 
 # ============================================================
-# TUTOR ACCOUNTS
+# 4. TUTOR LOGIN DETAILS
 # ============================================================
 
 TUTOR_ACCOUNTS = {
@@ -94,11 +94,11 @@ TUTOR_ACCOUNTS = {
     "Computer Science and Engineering (Artificial Intelligence)":
         ("tutor_cseai", "cseai123"),
 
-    "Computer Science and Engineering (Cyber Security)":
-        ("tutor_cyber", "cyber123"),
-
     "Computer Science and Engineering (Data Science)":
         ("tutor_csedata", "csedata123"),
+
+    "Computer Science and Engineering (Cyber Security)":
+        ("tutor_cyber", "cyber123"),
 
     "Artificial Intelligence and Machine Learning":
         ("tutor_aiml", "aiml123"),
@@ -163,195 +163,96 @@ TUTOR_ACCOUNTS = {
 
 
 # ============================================================
-# KTU 2024 AI & DATA SCIENCE CURRICULUM
+# 5. KTU 2024 AI & DATA SCIENCE CURRICULUM
 # ============================================================
 #
-# This is the main department for your project.
+# This is the curriculum section to use for your
+# AI & Data Science project.
 #
-# S1/S2 are Group-A common curriculum.
-# S3-S8 contain AI & Data Science specific courses.
+# The branch is selected FIRST.
+# Then semester.
+# Then only the subjects belonging to that branch/semester
+# are displayed.
 #
 # ============================================================
 
-AI_DS_2024 = {
-
-    "S1": [
-        "GAMAT101 - Mathematics for Information Science-I",
-        "GAPHT121 - Physics for Information Science",
-        "GXCYT122 - Chemistry for Information Science",
-        "GMEST103 - Engineering Graphics and Computer Aided Drawing",
-        "GXEST104 - Introduction to Electrical & Electronics Engineering",
-        "UCEST105 - Algorithmic Thinking with Python",
-        "GXESL106 - Basic Electrical and Electronics Engineering Workshop",
-        "UCHWT127 - Health and Wellness",
-        "UCHUT128 - Life Skills and Professional Communication",
-        "UCSEM129 - Digital 101 (NASSCOM)",
-    ],
-
-    "S2": [
-        "GAMAT201 - Mathematics for Information Science-II",
-        "GAPHT121 - Physics for Information Science",
-        "GXCYT122 - Chemistry for Information Science",
-        "GXEST203 - Foundations of Computing: From Hardware Essentials to Web Design",
-        "GXEST204 - Programming in C",
-        "PCCST205 - Discrete Mathematics",
-        "UCEST206 - Engineering Entrepreneurship & IPR",
-        "UCHWT127 - Health and Wellness",
-        "UCHUT128 - Life Skills and Professional Communication",
-        "GXESL208 - IT Workshop",
-        "UCSEM129 - Digital 101 (NASSCOM)",
-    ],
-
-    "S3": [
-        "GAMAT301 - Mathematics for Information Science-III",
-        "PCAIT302 - Foundations of Artificial Intelligence",
-        "PCCST303 - Data Structures and Algorithms",
-        "PBADT304 - Introduction to Data Science",
-        "GAEST305 - Digital Electronics & Logic Design",
-        "UCHUT346 - Economics for Engineers",
-        "UCHUT347 - Engineering Ethics and Sustainable Development",
-        "PCCSL307 - Data Structures Lab",
-        "PCCDL308 - Python and Statistical Modelling Lab",
-        "Remedial / Minor Course",
-    ],
-
-    "S4": [
-        "GAMAT401 - Mathematics for Information Science-IV",
-        "PCCST402 - Database Management Systems",
-        "PCCST403 - Operating Systems",
-        "PBCST404 - Computer Organization and Architecture",
-        "PEADT41N - Programme Elective-I",
-        "UCHUT346 - Economics for Engineers",
-        "UCHUT347 - Engineering Ethics and Sustainable Development",
-        "PCADL407 - Foundations of AI and Data Science Lab",
-        "PCCSL408 - DBMS Lab",
-        "Remedial / Minor / Honours Course",
-    ],
-
-    "S5": [
-        "PCCST501 - Computer Networks",
-        "PCADT502 - Robotics and Intelligent Systems",
-        "PCCST503 - Machine Learning",
-        "PBADT504 - Big Data Analytics",
-        "PEADT52N - Programme Elective-II",
-        "UCHUM506 - Constitution of India (MOOC)",
-        "PCADL507 - Robotics Lab",
-        "PCCDL508 - Data Analytics Lab",
-        "Remedial / Minor / Honours Course",
-        "Industrial Visit / Industrial Training",
-    ],
-
-    "S6": [
-        "PCADT601 - Deep Learning",
-        "PCADT602 - Internet of Things",
-        "PEADT63N - Programme Elective-III",
-        "PBADT604 - Data Mining and Warehousing",
-        "GAEST605 - Design Thinking and Product Development",
-        "OEADT61N - Open Elective / Industry Elective-I",
-        "PCADL607 - Deep Learning Lab",
-        "PCADP608 - Mini Project: Socially Relevant Project",
-        "Remedial / Minor / Honours Course",
-        "Industrial Visit / Industrial Training",
-    ],
-
-    "S7": [
-        "PEADT74N - Programme Elective-IV",
-        "PEADT75N - Programme Elective-V",
-        "OEADT72N - Open Elective / Industry Elective-II",
-        "UEHUT704 - HMC Elective",
-        "PCADS705 - Seminar",
-        "PCADP706 - Major Project / Internship",
-        "Remedial / Minor / Honours Course",
-    ],
-
-    "S8": [
-        "PEADT86N - Programme Elective-VI",
-        "OEADT83N - Open Elective / Industry Elective-III",
-        "UEHUT803 - Organizational Behavior and Business Communication",
-        "PCADP806 - Major Project / Internship",
-    ],
-}
-
-
-# ============================================================
-# GENERIC 2024 STRUCTURE FOR OTHER DEPARTMENTS
-# ============================================================
-#
-# These names intentionally indicate KTU programme-core slots
-# rather than pretending that every branch has identical subjects.
-#
-# Exact branch curriculum can be added separately.
-# ============================================================
-
-GENERIC_2024 = {
+KTU_AI_DS_2024 = {
 
     "S1": [
         "Mathematics for Information Science-I",
-        "Physics / Chemistry for Information Science",
+        "Physics for Information Science",
+        "Chemistry for Information Science",
         "Engineering Graphics and Computer Aided Drawing",
         "Introduction to Electrical & Electronics Engineering",
         "Algorithmic Thinking with Python",
         "Basic Electrical and Electronics Engineering Workshop",
-        "Health and Wellness / Life Skills",
-        "Digital 101 (NASSCOM)",
+        "Health and Wellness",
+        "Life Skills and Professional Communication",
+        "Digital 101",
     ],
 
     "S2": [
         "Mathematics for Information Science-II",
-        "Physics / Chemistry for Information Science",
-        "Branch-specific Engineering Science Course",
+        "Foundations of Computing",
         "Programming in C",
         "Discrete Mathematics",
         "Engineering Entrepreneurship & IPR",
         "IT Workshop",
         "Life Skills and Professional Communication",
-        "Digital 101 (NASSCOM)",
+        "Health and Wellness",
+        "Digital 101",
     ],
 
     "S3": [
-        "Group-specific Mathematics-III",
-        "Programme Core-1",
-        "Programme Core-2",
-        "Programme Core-PBL",
-        "Group-specific Engineering Science Course",
-        "Engineering Ethics and Sustainable Development / Economics",
-        "Programme Core Lab-1",
-        "Programme Core Lab-2",
+        "Mathematics for Information Science-III",
+        "Foundations of Artificial Intelligence",
+        "Data Structures and Algorithms",
+        "Introduction to Data Science",
+        "Digital Electronics & Logic Design",
+        "Economics for Engineers",
+        "Engineering Ethics and Sustainable Development",
+        "Data Structures Lab",
+        "Python and Statistical Modelling Lab",
+        "Remedial / Minor Course",
     ],
 
     "S4": [
-        "Group-specific Mathematics-IV",
-        "Programme Core-4",
-        "Programme Core-5",
-        "Programme Core-PBL-2",
+        "Mathematics for Information Science-IV",
+        "Database Management Systems",
+        "Operating Systems",
+        "Computer Organization and Architecture",
         "Programme Elective-I",
-        "Engineering Ethics and Sustainable Development / Economics",
-        "Programme Core Lab-3",
-        "Programme Core Lab-4",
+        "Economics for Engineers",
+        "Engineering Ethics and Sustainable Development",
+        "Foundations of AI and Data Science Lab",
+        "DBMS Lab",
+        "Remedial / Minor / Honours Course",
     ],
 
     "S5": [
-        "Programme Core-6",
-        "Programme Core-7",
-        "Programme Core-8",
-        "Programme Core-PBL-3",
+        "Computer Networks",
+        "Robotics and Intelligent Systems",
+        "Machine Learning",
+        "Big Data Analytics",
         "Programme Elective-II",
-        "Constitution of India (MOOC)",
-        "Programme Core Lab-5",
-        "Programme Core Lab-6",
-        "Industrial Visit / Industrial Training",
+        "Constitution of India",
+        "Robotics Lab",
+        "Data Analytics Lab",
+        "Remedial / Minor / Honours Course",
+        "Industrial Training / Industrial Visit",
     ],
 
     "S6": [
-        "Programme Core-9",
-        "Programme Core-10",
+        "Deep Learning",
+        "Internet of Things",
         "Programme Elective-III",
-        "Programme Core-PBL-4",
+        "Data Mining and Warehousing",
         "Design Thinking and Product Development",
         "Open Elective / Industry Elective-I",
-        "Programme Core Lab-7",
-        "Mini Project: Socially Relevant Project",
-        "Industrial Visit / Industrial Training",
+        "Deep Learning Lab",
+        "Mini Project",
+        "Remedial / Minor / Honours Course",
+        "Industrial Training / Industrial Visit",
     ],
 
     "S7": [
@@ -361,6 +262,7 @@ GENERIC_2024 = {
         "HMC Elective",
         "Seminar",
         "Major Project / Internship",
+        "Remedial / Minor / Honours Course",
     ],
 
     "S8": [
@@ -373,43 +275,46 @@ GENERIC_2024 = {
 
 
 # ============================================================
-# GET SUBJECTS
+# 6. CURRICULUM FUNCTION
 # ============================================================
 
-def get_subjects(branch, semester):
+def get_subjects(department, semester):
 
-    if branch == "Artificial Intelligence and Data Science":
-        return AI_DS_2024.get(
+    if department == "Artificial Intelligence and Data Science":
+
+        return KTU_AI_DS_2024.get(
             semester,
             []
         )
 
-    return GENERIC_2024.get(
-        semester,
-        []
-    )
+    # Other departments should be mapped using
+    # their verified KTU curriculum before deployment.
+
+    return []
 
 
 # ============================================================
-# CSS
+# 7. CSS
 # ============================================================
 
 st.markdown(
     """
 <style>
 
-/* MAIN APP */
+/* ==========================================================
+   GLOBAL
+   ========================================================== */
 
 .stApp {
     background:
         radial-gradient(
-            circle at 10% 10%,
-            rgba(0, 200, 255, 0.18),
-            transparent 30%
+            circle at 15% 15%,
+            rgba(0, 190, 255, 0.18),
+            transparent 28%
         ),
         radial-gradient(
-            circle at 90% 20%,
-            rgba(140, 70, 255, 0.18),
+            circle at 85% 20%,
+            rgba(150, 80, 255, 0.18),
             transparent 30%
         ),
         linear-gradient(
@@ -420,41 +325,72 @@ st.markdown(
         );
 }
 
-/* CENTER MAIN CONTENT */
+/* Main Streamlit content */
 
 .block-container {
-    max-width: 1250px !important;
+    max-width: 1200px !important;
     margin-left: auto !important;
     margin-right: auto !important;
     padding-top: 2rem !important;
+    padding-bottom: 3rem !important;
 }
 
-/* FRONT PAGE */
+/* ==========================================================
+   MAIN TITLE
+   ========================================================== */
 
-.front-page {
-    min-height: 82vh;
+.main-title {
+    text-align: center;
 
-    display: flex;
+    font-size: 44px;
 
-    align-items: center;
+    font-weight: 900;
 
-    justify-content: center;
+    color: #ffffff;
+
+    margin-top: 20px;
+
+    margin-bottom: 10px;
+}
+
+.main-title-line {
+    width: 120px;
+
+    height: 4px;
+
+    margin: 0 auto 35px auto;
+
+    border-radius: 10px;
+
+    background: linear-gradient(
+        90deg,
+        #36d1dc,
+        #8e54e9
+    );
+}
+
+/* ==========================================================
+   FRONT CARD
+   ========================================================== */
+
+.front-card {
+
+    max-width: 900px;
+
+    margin: 15vh auto 40px auto;
+
+    padding: 55px 45px;
 
     text-align: center;
-}
-
-.front-box {
-    width: min(900px, 95%);
-
-    padding: 55px;
 
     border-radius: 30px;
 
-    background: rgba(15, 23, 50, 0.80);
+    background:
+        rgba(15, 23, 50, 0.82);
 
     border:
         1px solid
-        rgba(255,255,255,0.15);
+        rgba(255,255,255,0.12);
 
     box-shadow:
         0 25px 70px
@@ -463,53 +399,37 @@ st.markdown(
     backdrop-filter: blur(20px);
 }
 
-/* IMPORTANT: MAIN HEADING */
+/* ==========================================================
+   DASHBOARD HEADER
+   ========================================================== */
 
-.front-heading {
-    font-size: 48px;
+.dashboard-card {
 
-    font-weight: 900;
+    max-width: 1100px;
 
-    text-align: center;
+    margin: 0 auto 25px auto;
 
-    color: white;
-
-    margin-bottom: 35px;
-}
-
-/* DASHBOARD */
-
-.dashboard-box {
-    width: 100%;
-
-    max-width: 1150px;
-
-    margin-left: auto;
-
-    margin-right: auto;
+    padding: 30px;
 
     text-align: center;
-
-    padding: 28px;
 
     border-radius: 25px;
 
     background:
-        rgba(12,18,42,0.80);
+        rgba(15, 22, 48, 0.80);
 
     border:
         1px solid
         rgba(255,255,255,0.12);
 
     box-shadow:
-        0 20px 60px
+        0 20px 55px
         rgba(0,0,0,0.30);
 }
 
-/* DASHBOARD HEADING */
+.dashboard-title {
 
-.dashboard-heading {
-    font-size: 38px;
+    font-size: 36px;
 
     font-weight: 900;
 
@@ -517,23 +437,25 @@ st.markdown(
 
     text-align: center;
 
-    margin-bottom: 5px;
 }
 
 .dashboard-subtitle {
-    text-align: center;
 
-    color: #b9c8df;
+    margin-top: 8px;
 
     font-size: 16px;
+
+    color: #b8c5dc;
+
 }
 
-/* SECTION */
+/* ==========================================================
+   SECTION
+   ========================================================== */
 
-.section {
-    width: 100%;
+.section-card {
 
-    max-width: 1150px;
+    max-width: 1100px;
 
     margin: 20px auto;
 
@@ -542,74 +464,91 @@ st.markdown(
     border-radius: 22px;
 
     background:
-        rgba(12,18,42,0.70);
+        rgba(15, 22, 48, 0.72);
 
     border:
         1px solid
         rgba(255,255,255,0.10);
+
 }
 
-/* LOGIN */
+/* ==========================================================
+   SUBJECT
+   ========================================================== */
 
-.login-box {
-    max-width: 600px;
+.subject-card {
 
-    margin: 35px auto;
+    padding: 18px;
 
-    padding: 35px;
+    margin: 10px 0;
 
-    border-radius: 25px;
-
-    background:
-        rgba(12,18,42,0.82);
-
-    border:
-        1px solid
-        rgba(255,255,255,0.12);
-}
-
-/* SUBJECT */
-
-.subject-box {
-    padding: 20px;
-
-    margin-bottom: 15px;
-
-    border-radius: 18px;
+    border-radius: 15px;
 
     background:
         rgba(255,255,255,0.05);
 
     border:
         1px solid
-        rgba(255,255,255,0.10);
+        rgba(255,255,255,0.08);
+
 }
 
-.subject-name {
-    font-size: 19px;
+/* ==========================================================
+   LOGIN
+   ========================================================== */
 
-    font-weight: 800;
+.login-card {
 
-    color: white;
+    max-width: 600px;
 
-    margin-bottom: 10px;
+    margin: 30px auto;
+
+    padding: 35px;
+
+    border-radius: 25px;
+
+    background:
+        rgba(15,22,48,0.82);
+
+    border:
+        1px solid
+        rgba(255,255,255,0.12);
+
 }
 
-/* MOBILE */
+/* ==========================================================
+   BUTTON
+   ========================================================== */
 
-@media(max-width:700px) {
+.stButton > button {
 
-    .front-heading {
+    min-height: 45px;
+
+    border-radius: 13px;
+
+    font-weight: 700;
+
+}
+
+/* ==========================================================
+   MOBILE
+   ========================================================== */
+
+@media(max-width: 700px) {
+
+    .main-title {
         font-size: 30px;
     }
 
-    .front-box {
-        padding: 30px 20px;
+    .dashboard-title {
+        font-size: 27px;
     }
 
-    .dashboard-heading {
-        font-size: 28px;
+    .front-card {
+        margin-top: 8vh;
+        padding: 35px 20px;
     }
+
 }
 
 </style>
@@ -619,33 +558,28 @@ st.markdown(
 
 
 # ============================================================
-# SESSION STATE
+# 8. SESSION STATE
 # ============================================================
 
-if "page" not in st.session_state:
-    st.session_state.page = "home"
+defaults = {
+    "page": "home",
+    "student_logged": False,
+    "tutor_logged": False,
+    "student_id": "",
+    "student_username": "",
+    "tutor_branch": "",
+    "tutor_username": "",
+}
 
-if "student_logged" not in st.session_state:
-    st.session_state.student_logged = False
+for key, value in defaults.items():
 
-if "tutor_logged" not in st.session_state:
-    st.session_state.tutor_logged = False
+    if key not in st.session_state:
 
-if "student_id" not in st.session_state:
-    st.session_state.student_id = ""
-
-if "student_username" not in st.session_state:
-    st.session_state.student_username = ""
-
-if "tutor_branch" not in st.session_state:
-    st.session_state.tutor_branch = ""
-
-if "tutor_username" not in st.session_state:
-    st.session_state.tutor_username = ""
+        st.session_state[key] = value
 
 
 # ============================================================
-# CREATE DATA FILE
+# 9. DATA FILE
 # ============================================================
 
 def create_data_file():
@@ -683,8 +617,13 @@ def load_data():
     create_data_file()
 
     try:
-        return pd.read_csv(DATA_FILE)
+
+        return pd.read_csv(
+            DATA_FILE
+        )
+
     except Exception:
+
         return pd.DataFrame()
 
 
@@ -702,117 +641,123 @@ def save_data(df):
 
 
 # ============================================================
-# ATTENDANCE
+# 10. PERFORMANCE CALCULATION
 # ============================================================
 
-def attendance_mark(value):
+def attendance_mark(attendance):
 
-    value = float(value)
+    attendance = float(
+        attendance
+    )
 
-    if value >= 90:
+    if attendance >= 90:
         return 5
 
-    if value >= 80:
+    elif attendance >= 80:
         return 4
 
-    if value >= 70:
+    elif attendance >= 70:
         return 3
 
-    if value >= 60:
+    elif attendance >= 60:
         return 2
 
-    if value >= 10:
+    elif attendance >= 10:
         return 1
 
     return 0
 
 
-# ============================================================
-# PERFORMANCE
-# ============================================================
-
 def calculate_performance(row):
 
-    attendance = float(row["Attendance"])
-    study = float(row["Study_Hours"])
-    internal = float(row["Internal"])
-    assignment = float(row["Assignment"])
-    previous = float(row["Previous_Mark"])
+    attendance = float(
+        row["Attendance"]
+    )
 
-    att = attendance_mark(
+    study = float(
+        row["Study_Hours"]
+    )
+
+    internal = float(
+        row["Internal"]
+    )
+
+    assignment = float(
+        row["Assignment"]
+    )
+
+    previous = float(
+        row["Previous_Mark"]
+    )
+
+    att_mark = attendance_mark(
         attendance
     )
 
-    attendance_percent = (
-        att / 5
+    attendance_percentage = (
+        att_mark / 5
     ) * 100
 
-    study_percent = min(
+    study_percentage = min(
         study / 6 * 100,
         100
     )
 
-    internal_percent = (
+    internal_percentage = (
         internal / 40
     ) * 100
 
-    assignment_percent = (
+    assignment_percentage = (
         assignment / 15
     ) * 100
 
-    previous_percent = (
+    previous_percentage = (
         previous / 60
     ) * 100
 
-    overall = np.mean(
-        [
-            attendance_percent,
-            study_percent,
-            internal_percent,
-            assignment_percent,
-            previous_percent,
-        ]
-    )
+    overall = np.mean([
+        attendance_percentage,
+        study_percentage,
+        internal_percentage,
+        assignment_percentage,
+        previous_percentage,
+    ])
 
     if overall < 50:
 
         return (
-            round(overall, 2),
+            overall,
             "Low Performance",
-            "🔴",
-            "#ff4d4d"
+            "🔴"
         )
 
     elif overall < 65:
 
         return (
-            round(overall, 2),
+            overall,
             "Average Performance",
-            "🟠",
-            "#ff9f43"
+            "🟠"
         )
 
     elif overall < 80:
 
         return (
-            round(overall, 2),
+            overall,
             "Above Average Performance",
-            "🟡",
-            "#ffd93d"
+            "🟡"
         )
 
     else:
 
         return (
-            round(overall, 2),
+            overall,
             "Good Performance",
-            "🟢",
-            "#45e36b"
+            "🟢"
         )
 
 
 # ============================================================
-# PASSWORD
+# 11. STUDENT PASSWORD
 # ============================================================
 
 def valid_student_password(password):
@@ -831,81 +776,93 @@ def valid_student_password(password):
 
 
 # ============================================================
-# HOME
+# 12. HOME PAGE
 # ============================================================
 
-def home():
+def home_page():
 
     st.markdown(
-        """
-        <div class="front-page">
+        "<div class='front-card'>",
+        unsafe_allow_html=True
+    )
 
-            <div class="front-box">
+    # IMPORTANT:
+    # st.title guarantees that the heading is rendered.
 
-                <div class="front-heading">
-                    🎓 STUDENT PERFORMANCE PREDICTION
-                </div>
-
-            </div>
-
-        </div>
-        """,
+    st.markdown(
+        "<div class='main-title'>🎓 STUDENT PERFORMANCE PREDICTION</div>",
         unsafe_allow_html=True
     )
 
     st.markdown(
-        "<h3 style='text-align:center;color:white;'>Select Login</h3>",
+        "<div class='main-title-line'></div>",
         unsafe_allow_html=True
     )
 
-    c1, c2, c3 = st.columns(
-        [1, 2, 2]
+    st.markdown(
+        "</div>",
+        unsafe_allow_html=True
     )
 
-    with c2:
+    st.markdown(
+        "<h3 style='text-align:center;'>Select Login</h3>",
+        unsafe_allow_html=True
+    )
+
+    left, student_col, tutor_col, right = st.columns(
+        [1, 2, 2, 1]
+    )
+
+    with student_col:
 
         if st.button(
             "🎓 STUDENT LOGIN",
             width="stretch"
         ):
 
-            st.session_state.page = "student_login"
+            st.session_state.page = (
+                "student_login"
+            )
 
             st.rerun()
 
-    with c3:
+    with tutor_col:
 
         if st.button(
             "👨‍🏫 TUTOR LOGIN",
             width="stretch"
         ):
 
-            st.session_state.page = "tutor_login"
+            st.session_state.page = (
+                "tutor_login"
+            )
 
             st.rerun()
 
 
 # ============================================================
-# STUDENT LOGIN
+# 13. STUDENT LOGIN
 # ============================================================
 
 def student_login():
 
     st.markdown(
-        """
-        <div class="dashboard-box">
-
-            <div class="dashboard-heading">
-                🎓 Student Login
-            </div>
-
-        </div>
-        """,
+        "<div class='dashboard-card'>",
         unsafe_allow_html=True
     )
 
     st.markdown(
-        '<div class="login-box">',
+        "<div class='dashboard-title'>🎓 Student Login</div>",
+        unsafe_allow_html=True
+    )
+
+    st.markdown(
+        "</div>",
+        unsafe_allow_html=True
+    )
+
+    st.markdown(
+        "<div class='login-card'>",
         unsafe_allow_html=True
     )
 
@@ -948,12 +905,12 @@ def student_login():
             if df.empty:
 
                 st.error(
-                    "No student records available."
+                    "No student records are available."
                 )
 
             else:
 
-                matched = df[
+                found = df[
                     df["University_ID"]
                     .astype(str)
                     .str.strip()
@@ -961,7 +918,7 @@ def student_login():
                     university_id.strip()
                 ]
 
-                if matched.empty:
+                if found.empty:
 
                     st.error(
                         "University ID not found."
@@ -1001,32 +958,34 @@ def student_login():
 
 
 # ============================================================
-# TUTOR LOGIN
+# 14. TUTOR LOGIN
 # ============================================================
 
 def tutor_login():
 
     st.markdown(
-        """
-        <div class="dashboard-box">
-
-            <div class="dashboard-heading">
-                👨‍🏫 Tutor Login
-            </div>
-
-        </div>
-        """,
+        "<div class='dashboard-card'>",
         unsafe_allow_html=True
     )
 
     st.markdown(
-        '<div class="login-box">',
+        "<div class='dashboard-title'>👨‍🏫 Tutor Login</div>",
         unsafe_allow_html=True
     )
 
-    branch = st.selectbox(
-        "Select Department",
-        BRANCHES
+    st.markdown(
+        "</div>",
+        unsafe_allow_html=True
+    )
+
+    st.markdown(
+        "<div class='login-card'>",
+        unsafe_allow_html=True
+    )
+
+    department = st.selectbox(
+        "Department",
+        DEPARTMENTS
     )
 
     username = st.text_input(
@@ -1044,7 +1003,9 @@ def tutor_login():
     ):
 
         correct_username, correct_password = (
-            TUTOR_ACCOUNTS[branch]
+            TUTOR_ACCOUNTS[
+                department
+            ]
         )
 
         if (
@@ -1056,7 +1017,7 @@ def tutor_login():
             st.session_state.tutor_logged = True
 
             st.session_state.tutor_branch = (
-                branch
+                department
             )
 
             st.session_state.tutor_username = (
@@ -1072,7 +1033,7 @@ def tutor_login():
         else:
 
             st.error(
-                "Invalid tutor username or password."
+                "Invalid username or password."
             )
 
     if st.button(
@@ -1091,7 +1052,7 @@ def tutor_login():
 
 
 # ============================================================
-# STUDENT DASHBOARD
+# 15. STUDENT DASHBOARD
 # ============================================================
 
 def student_dashboard():
@@ -1107,7 +1068,7 @@ def student_dashboard():
         .astype(str)
         .str.strip()
         ==
-        str(student_id).strip()
+        student_id
     ].copy()
 
     if student_df.empty:
@@ -1122,28 +1083,33 @@ def student_dashboard():
         student_df.iloc[0]["Name"]
     )
 
-    branch = str(
+    department = str(
         student_df.iloc[0]["Branch"]
     )
 
     # --------------------------------------------------------
-    # CENTERED HEADER
+    # HEADER
     # --------------------------------------------------------
 
     st.markdown(
-        f"""
-        <div class="dashboard-box">
+        "<div class='dashboard-card'>",
+        unsafe_allow_html=True
+    )
 
-            <div class="dashboard-heading">
-                🎓 {student_name}
-            </div>
+    st.markdown(
+        f"<div class='dashboard-title'>🎓 {student_name}</div>",
+        unsafe_allow_html=True
+    )
 
-            <div class="dashboard-subtitle">
-                Student Performance Dashboard
-            </div>
+    st.markdown(
+        "<div class='dashboard-subtitle'>"
+        "Student Performance Dashboard"
+        "</div>",
+        unsafe_allow_html=True
+    )
 
-        </div>
-        """,
+    st.markdown(
+        "</div>",
         unsafe_allow_html=True
     )
 
@@ -1153,14 +1119,17 @@ def student_dashboard():
 
     st.markdown(
         f"""
-        <div class="section">
+        <div class="section-card">
 
             <h3 style="text-align:center;">
                 Department
             </h3>
 
-            <p style="text-align:center;font-size:18px;">
-                {branch}
+            <p style="
+                text-align:center;
+                font-size:18px;
+            ">
+                {department}
             </p>
 
         </div>
@@ -1187,28 +1156,29 @@ def student_dashboard():
     )
 
     subjects = get_subjects(
-        branch,
+        department,
         semester
     )
 
     if not subjects:
 
         st.warning(
-            "No curriculum has been mapped for this department."
+            "The selected department has not yet been mapped "
+            "to the verified KTU curriculum in this project."
         )
 
         return
 
     # --------------------------------------------------------
-    # SHOW KTU SUBJECTS
+    # KTU SUBJECT LIST
     # --------------------------------------------------------
 
     st.markdown(
         f"""
-        <div class="section">
+        <div class="section-card">
 
             <h2 style="text-align:center;">
-                {semester} — KTU Subjects
+                📚 {semester} — KTU Subjects
             </h2>
 
         </div>
@@ -1216,15 +1186,18 @@ def student_dashboard():
         unsafe_allow_html=True
     )
 
-    for subject in subjects:
+    for number, subject in enumerate(
+        subjects,
+        start=1
+    ):
 
         st.markdown(
             f"""
-            <div class="subject-box">
+            <div class="subject-card">
 
-                <div class="subject-name">
-                    📘 {subject}
-                </div>
+                <b>
+                    {number}. {subject}
+                </b>
 
             </div>
             """,
@@ -1232,57 +1205,62 @@ def student_dashboard():
         )
 
     # --------------------------------------------------------
-    # STUDENT DATA FOR SELECTED SEMESTER
+    # STUDENT MARKS
     # --------------------------------------------------------
 
     current = student_df[
         student_df["Semester"].astype(str)
-        == semester
+        ==
+        semester
     ].copy()
 
     if current.empty:
 
         st.info(
-            f"No marks have been entered for {semester} yet."
+            "Marks have not been entered by the tutor "
+            "for this semester."
         )
 
     else:
 
-        results = []
+        st.markdown(
+            f"""
+            <div class="section-card">
+
+                <h2 style="text-align:center;">
+                    📊 {semester} Performance
+                </h2>
+
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
 
         for _, row in current.iterrows():
 
-            percentage, level, emoji, color = (
-                calculate_performance(row)
-            )
-
-            results.append(
-                percentage
+            percentage, level, emoji = (
+                calculate_performance(
+                    row
+                )
             )
 
             st.markdown(
                 f"""
-                <div class="section">
+                <div class="section-card">
 
                     <h3 style="text-align:center;">
-                        📚 {row["Subject"]}
+                        📘 {row["Subject"]}
                     </h3>
 
-                    <div style="
-                        text-align:center;
-                        font-size:25px;
-                    ">
+                    <h2 style="text-align:center;">
                         {emoji}
-                    </div>
+                    </h2>
 
                     <h3 style="text-align:center;">
                         {level}
                     </h3>
 
-                    <h2 style="
-                        text-align:center;
-                        color:{color};
-                    ">
+                    <h2 style="text-align:center;">
                         {percentage:.2f}%
                     </h2>
 
@@ -1291,33 +1269,33 @@ def student_dashboard():
                 unsafe_allow_html=True
             )
 
-            a, b, c, d, e = st.columns(5)
+            c1, c2, c3, c4, c5 = st.columns(5)
 
-            with a:
+            with c1:
                 st.metric(
                     "Attendance",
                     f'{row["Attendance"]}%'
                 )
 
-            with b:
+            with c2:
                 st.metric(
                     "Internal",
                     f'{row["Internal"]}/40'
                 )
 
-            with c:
+            with c3:
                 st.metric(
                     "Assignment",
                     f'{row["Assignment"]}/15'
                 )
 
-            with d:
+            with c4:
                 st.metric(
                     "Previous",
                     f'{row["Previous_Mark"]}/60'
                 )
 
-            with e:
+            with c5:
                 st.metric(
                     "Study Hours",
                     f'{row["Study_Hours"]}'
@@ -1334,48 +1312,46 @@ def student_dashboard():
 
 
 # ============================================================
-# TUTOR DASHBOARD
+# 16. TUTOR DASHBOARD
 # ============================================================
 
 def tutor_dashboard():
 
-    branch = (
+    department = (
         st.session_state.tutor_branch
     )
 
+    # --------------------------------------------------------
+    # HEADER
+    # --------------------------------------------------------
+
     st.markdown(
-        f"""
-        <div class="dashboard-box">
+        "<div class='dashboard-card'>",
+        unsafe_allow_html=True
+    )
 
-            <div class="dashboard-heading">
-                👨‍🏫 Tutor Dashboard
-            </div>
+    st.markdown(
+        "<div class='dashboard-title'>"
+        "👨‍🏫 Tutor Dashboard"
+        "</div>",
+        unsafe_allow_html=True
+    )
 
-            <div class="dashboard-subtitle">
-                {branch}
-            </div>
+    st.markdown(
+        f"<div class='dashboard-subtitle'>"
+        f"{department}"
+        f"</div>",
+        unsafe_allow_html=True
+    )
 
-        </div>
-        """,
+    st.markdown(
+        "</div>",
         unsafe_allow_html=True
     )
 
     # --------------------------------------------------------
-    # CURRICULUM SELECTOR
+    # SEMESTER
     # --------------------------------------------------------
-
-    st.markdown(
-        """
-        <div class="section">
-
-            <h2 style="text-align:center;">
-                📚 KTU Curriculum
-            </h2>
-
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
 
     semester = st.selectbox(
         "Select Semester",
@@ -1393,37 +1369,50 @@ def tutor_dashboard():
     )
 
     subjects = get_subjects(
-        branch,
+        department,
         semester
     )
 
-    if subjects:
+    if not subjects:
 
-        st.markdown(
-            f"""
-            <div class="section">
-
-                <h3 style="text-align:center;">
-                    {branch}
-                </h3>
-
-                <h3 style="text-align:center;">
-                    {semester} Subjects
-                </h3>
-
-            </div>
-            """,
-            unsafe_allow_html=True
+        st.warning(
+            "This department has not been mapped "
+            "to a verified curriculum in this version."
         )
 
-        for i, subject in enumerate(
-            subjects,
-            start=1
+        if st.button(
+            "🚪 LOGOUT",
+            width="stretch"
         ):
+            logout()
 
-            st.write(
-                f"**{i}.** {subject}"
-            )
+        return
+
+    # --------------------------------------------------------
+    # CURRICULUM DISPLAY
+    # --------------------------------------------------------
+
+    st.markdown(
+        f"""
+        <div class="section-card">
+
+            <h2 style="text-align:center;">
+                📚 {semester} Subjects
+            </h2>
+
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+
+    for i, subject in enumerate(
+        subjects,
+        start=1
+    ):
+
+        st.write(
+            f"**{i}.** {subject}"
+        )
 
     st.divider()
 
@@ -1431,7 +1420,7 @@ def tutor_dashboard():
     # TABS
     # --------------------------------------------------------
 
-    add_tab, data_tab, cluster_tab, rf_tab = st.tabs(
+    add_tab, data_tab, kmeans_tab, rf_tab = st.tabs(
         [
             "➕ Add Student",
             "📋 Student Data",
@@ -1447,21 +1436,19 @@ def tutor_dashboard():
     with add_tab:
 
         st.header(
-            "Add Student Performance"
+            "Add Student"
         )
 
-        name = st.text_input(
-            "Student Name",
-            key="new_student_name"
+        student_name = st.text_input(
+            "Student Name"
         )
 
         university_id = st.text_input(
-            "University ID",
-            key="new_student_id"
+            "University ID"
         )
 
         st.subheader(
-            f"{semester} Subject Records"
+            "Enter Performance Details"
         )
 
         records = []
@@ -1478,61 +1465,66 @@ def tutor_dashboard():
 
                 attendance = st.number_input(
                     "Attendance %",
-                    0.0,
-                    100.0,
-                    80.0,
-                    key=f"a_{semester}_{subject}"
+                    min_value=0.0,
+                    max_value=100.0,
+                    value=80.0,
+                    step=1.0,
+                    key=f"attendance_{semester}_{subject}"
                 )
 
             with c2:
 
-                study = st.number_input(
+                study_hours = st.number_input(
                     "Study Hours",
-                    0.0,
-                    6.0,
-                    3.0,
-                    key=f"s_{semester}_{subject}"
+                    min_value=0.0,
+                    max_value=6.0,
+                    value=3.0,
+                    step=0.5,
+                    key=f"study_{semester}_{subject}"
                 )
 
             with c3:
 
                 internal = st.number_input(
                     "Internal /40",
-                    0.0,
-                    40.0,
-                    25.0,
-                    key=f"i_{semester}_{subject}"
+                    min_value=0.0,
+                    max_value=40.0,
+                    value=25.0,
+                    step=1.0,
+                    key=f"internal_{semester}_{subject}"
                 )
 
             with c4:
 
                 assignment = st.number_input(
                     "Assignment /15",
-                    0.0,
-                    15.0,
-                    10.0,
-                    key=f"as_{semester}_{subject}"
+                    min_value=0.0,
+                    max_value=15.0,
+                    value=10.0,
+                    step=1.0,
+                    key=f"assignment_{semester}_{subject}"
                 )
 
             with c5:
 
                 previous = st.number_input(
                     "Previous /60",
-                    0.0,
-                    60.0,
-                    35.0,
-                    key=f"p_{semester}_{subject}"
+                    min_value=0.0,
+                    max_value=60.0,
+                    value=35.0,
+                    step=1.0,
+                    key=f"previous_{semester}_{subject}"
                 )
 
             records.append(
                 {
-                    "Name": name,
+                    "Name": student_name,
                     "University_ID": university_id,
-                    "Branch": branch,
+                    "Branch": department,
                     "Semester": semester,
                     "Subject": subject,
                     "Attendance": attendance,
-                    "Study_Hours": study,
+                    "Study_Hours": study_hours,
                     "Internal": internal,
                     "Assignment": assignment,
                     "Previous_Mark": previous,
@@ -1540,11 +1532,11 @@ def tutor_dashboard():
             )
 
         if st.button(
-            "💾 SAVE STUDENT",
+            "💾 SAVE STUDENT RECORDS",
             width="stretch"
         ):
 
-            if not name.strip():
+            if not student_name.strip():
 
                 st.error(
                     "Enter student name."
@@ -1605,7 +1597,7 @@ def tutor_dashboard():
                 st.rerun()
 
     # ========================================================
-    # DATA TAB
+    # DATA
     # ========================================================
 
     with data_tab:
@@ -1619,7 +1611,7 @@ def tutor_dashboard():
         if df.empty:
 
             st.info(
-                "No student data available."
+                "No data available."
             )
 
         else:
@@ -1627,7 +1619,7 @@ def tutor_dashboard():
             branch_df = df[
                 df["Branch"].astype(str)
                 ==
-                branch
+                department
             ].copy()
 
             if branch_df.empty:
@@ -1649,7 +1641,7 @@ def tutor_dashboard():
                     data=branch_df.to_csv(
                         index=False
                     ).encode("utf-8"),
-                    file_name="branch_data.csv",
+                    file_name="branch_student_data.csv",
                     mime="text/csv",
                     width="stretch"
                 )
@@ -1658,7 +1650,7 @@ def tutor_dashboard():
                     "Delete Student"
                 )
 
-                ids = (
+                student_ids = (
                     branch_df[
                         "University_ID"
                     ]
@@ -1668,12 +1660,12 @@ def tutor_dashboard():
                 )
 
                 selected_id = st.selectbox(
-                    "Select University ID",
-                    ids
+                    "University ID",
+                    student_ids
                 )
 
                 if st.button(
-                    "🗑️ DELETE STUDENT",
+                    "🗑️ DELETE COMPLETE HISTORY",
                     width="stretch"
                 ):
 
@@ -1692,7 +1684,7 @@ def tutor_dashboard():
                                     "Branch"
                                 ].astype(str)
                                 ==
-                                branch
+                                department
                             )
                         )
                     ]
@@ -1702,7 +1694,7 @@ def tutor_dashboard():
                     )
 
                     st.success(
-                        "Student data deleted."
+                        "Student history deleted."
                     )
 
                     st.rerun()
@@ -1711,7 +1703,7 @@ def tutor_dashboard():
     # K-MEANS
     # ========================================================
 
-    with cluster_tab:
+    with kmeans_tab:
 
         st.header(
             "📊 K-Means Clustering"
@@ -1722,47 +1714,54 @@ def tutor_dashboard():
         branch_df = df[
             df["Branch"].astype(str)
             ==
-            branch
+            department
         ].copy()
+
+        features = [
+            "Attendance",
+            "Study_Hours",
+            "Internal",
+            "Assignment",
+            "Previous_Mark",
+        ]
 
         if len(branch_df) < 3:
 
             st.warning(
-                "At least 3 records are required."
+                "At least 3 student records are required."
             )
 
         else:
-
-            features = [
-                "Attendance",
-                "Study_Hours",
-                "Internal",
-                "Assignment",
-                "Previous_Mark",
-            ]
 
             X = branch_df[
                 features
             ].apply(
                 pd.to_numeric,
                 errors="coerce"
-            ).dropna()
+            )
 
-            if len(X) >= 3:
+            valid = X.dropna()
+
+            if len(valid) >= 3:
+
+                number_of_clusters = min(
+                    3,
+                    len(valid)
+                )
 
                 model = KMeans(
-                    n_clusters=3,
+                    n_clusters=number_of_clusters,
                     random_state=42,
                     n_init=10
                 )
 
-                clusters = model.fit_predict(
-                    X
+                cluster_values = model.fit_predict(
+                    valid
                 )
 
                 score = silhouette_score(
-                    X,
-                    clusters
+                    valid,
+                    cluster_values
                 )
 
                 st.metric(
@@ -1771,12 +1770,12 @@ def tutor_dashboard():
                 )
 
                 result = branch_df.loc[
-                    X.index
+                    valid.index
                 ].copy()
 
                 result[
                     "KMeans_Cluster"
-                ] = clusters
+                ] = cluster_values
 
                 st.dataframe(
                     result[
@@ -1807,76 +1806,93 @@ def tutor_dashboard():
         branch_df = df[
             df["Branch"].astype(str)
             ==
-            branch
+            department
         ].copy()
+
+        features = [
+            "Attendance",
+            "Study_Hours",
+            "Internal",
+            "Assignment",
+            "Previous_Mark",
+        ]
 
         if len(branch_df) < 10:
 
             st.warning(
-                "At least 10 records are recommended."
+                "At least 10 records are recommended "
+                "for Random Forest."
             )
 
         else:
 
-            feature_cols = [
-                "Attendance",
-                "Study_Hours",
-                "Internal",
-                "Assignment",
-                "Previous_Mark",
-            ]
-
             X = branch_df[
-                feature_cols
+                features
             ].apply(
                 pd.to_numeric,
                 errors="coerce"
             )
 
-            y = []
+            labels = []
 
-            valid_rows = []
+            valid_indices = []
 
             for index, row in branch_df.iterrows():
 
                 try:
 
-                    _, level, _, _ = (
+                    _, level, _ = (
                         calculate_performance(
                             row
                         )
                     )
 
-                    y.append(level)
+                    labels.append(
+                        level
+                    )
 
-                    valid_rows.append(
+                    valid_indices.append(
                         index
                     )
 
                 except Exception:
-                    pass
+                    continue
 
             X = X.loc[
+                valid_indices
+            ]
+
+            y = np.array(
+                labels
+            )
+
+            valid_rows = ~X.isna().any(
+                axis=1
+            )
+
+            X = X[
                 valid_rows
             ]
 
-            y = np.array(y)
+            y = y[
+                valid_rows.values
+            ]
 
-            X = X.dropna()
-
-            if len(X) >= 10 and len(
-                np.unique(y)
-            ) >= 2:
+            if (
+                len(X) >= 10
+                and
+                len(np.unique(y)) >= 2
+            ):
 
                 try:
 
                     X_train, X_test, y_train, y_test = (
                         train_test_split(
                             X,
-                            y[:len(X)],
+                            y,
                             test_size=0.2,
                             random_state=42,
-                            stratify=y[:len(X)]
+                            stratify=y
                         )
                     )
 
@@ -1885,40 +1901,41 @@ def tutor_dashboard():
                     X_train, X_test, y_train, y_test = (
                         train_test_split(
                             X,
-                            y[:len(X)],
+                            y,
                             test_size=0.2,
                             random_state=42
                         )
                     )
 
-                rf = RandomForestClassifier(
+                model = RandomForestClassifier(
                     n_estimators=100,
                     random_state=42
                 )
 
-                rf.fit(
+                model.fit(
                     X_train,
                     y_train
                 )
 
-                predictions = rf.predict(
+                prediction = model.predict(
                     X_test
                 )
 
                 accuracy = accuracy_score(
                     y_test,
-                    predictions
+                    prediction
                 )
 
                 st.metric(
-                    "Accuracy",
+                    "Random Forest Accuracy",
                     f"{accuracy * 100:.2f}%"
                 )
 
             else:
 
                 st.warning(
-                    "Multiple performance classes are required."
+                    "At least two performance classes "
+                    "are required."
                 )
 
     # ========================================================
@@ -1936,7 +1953,7 @@ def tutor_dashboard():
 
 
 # ============================================================
-# LOGOUT
+# 17. LOGOUT
 # ============================================================
 
 def logout():
@@ -1959,14 +1976,14 @@ def logout():
 
 
 # ============================================================
-# MAIN
+# 18. START APPLICATION
 # ============================================================
 
 create_data_file()
 
 if st.session_state.page == "home":
 
-    home()
+    home_page()
 
 elif st.session_state.page == "student_login":
 
