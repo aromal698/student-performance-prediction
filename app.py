@@ -15,9 +15,12 @@ from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, Tabl
 try:
     from sklearn.cluster import KMeans
     from sklearn.preprocessing import StandardScaler
+    from sklearn.neural_network import MLPClassifier
     SKLEARN_AVAILABLE = True
+    ANN_AVAILABLE = True
 except Exception:
     SKLEARN_AVAILABLE = False
+    ANN_AVAILABLE = False
 
 # ============================================================
 # CONFIG
@@ -267,7 +270,7 @@ def app_brand():
           <circle cx="48" cy="18" r="5" fill="white" opacity=".9"/>
         </svg>
       </div>
-      <div><div class="brand-name">EduPredict SPP</div><div class="brand-tag">Student Performance Prediction • KTU B.Tech</div></div>
+      <div><div class="brand-name">EduPredict SPP</div><div class="brand-tag">Student Performance Prediction • KTU B.Tech • ANN + K-Means</div></div>
     </div>
     <div class="three-d-field" aria-hidden="true">
       <div class="three-d-object cube"></div><div class="three-d-object ring3d"></div>
@@ -374,6 +377,116 @@ def performance_circle(level):
         "Above Average": "🟡",
         "Good": "🟢",
     }.get(level, "⚪")
+
+
+def _ann_features_from_subject(item):
+    """Return the five ANN input features used by EduPredict SPP."""
+    return [
+        float(item.get("Attendance_Mark", attendance_mark(item.get("Attendance", 0)))),
+        float(item.get("Internal", 0)),
+        float(item.get("Assignment", 0)),
+        float(item.get("Previous", 0)),
+        float(item.get("Study_Hours", 0)),
+    ]
+
+
+def _ann_level_from_features(row):
+    """Project-defined target used only when real labelled records are insufficient."""
+    att, internal, assignment, previous, study = row
+    score = float(np.mean([
+        (att / 5) * 100,
+        (min(max(study, 0), 6) / 6) * 100,
+        (internal / 40) * 100,
+        (assignment / 15) * 100,
+        (previous / 60) * 100,
+    ]))
+    if score >= 80:
+        return "Good"
+    if score >= 65:
+        return "Above Average"
+    if score >= 50:
+        return "Average"
+    return "Needs Improvement"
+
+
+def train_ann_model():
+    """Train the ANN from stored labelled records, with a project-defined seed dataset for first use."""
+    if not ANN_AVAILABLE:
+        return {"available": False, "message": "scikit-learn is not installed. Run: pip install scikit-learn"}
+
+    X_real, y_real = [], []
+    df = load_reports()
+    if not df.empty:
+        for _, report in df.iterrows():
+            for item in parse_subjects(report.get("Subjects_JSON", "[]")):
+                try:
+                    features = _ann_features_from_subject(item)
+                    label = str(item.get("Level", "")).strip()
+                    if label not in {"Good", "Above Average", "Average", "Needs Improvement"}:
+                        label = _ann_level_from_features(features)
+                    X_real.append(features)
+                    y_real.append(label)
+                except (TypeError, ValueError):
+                    continue
+
+    # A first-run ANN needs enough examples and at least two classes. The seed
+    # data is generated from the same project-defined scoring rubric; once enough
+    # real labelled records exist, those records become the ANN training source.
+    use_real = len(X_real) >= 20 and len(set(y_real)) >= 2
+    if use_real:
+        X, y, source = np.asarray(X_real, dtype=float), np.asarray(y_real), "stored student records"
+    else:
+        rng = np.random.default_rng(42)
+        n = 1600
+        X = np.column_stack([
+            rng.integers(0, 6, n),
+            rng.uniform(0, 40, n),
+            rng.uniform(0, 15, n),
+            rng.uniform(0, 60, n),
+            rng.uniform(0, 6, n),
+        ])
+        y = np.asarray([_ann_level_from_features(row) for row in X])
+        source = "project-defined seed training data (used until 20+ labelled records are available)"
+
+    scaler = StandardScaler()
+    X_scaled = scaler.fit_transform(X)
+    model = MLPClassifier(
+        hidden_layer_sizes=(32, 16),
+        activation="relu",
+        solver="adam",
+        learning_rate_init=0.005,
+        max_iter=1200,
+        random_state=42,
+        early_stopping=False,
+    )
+    try:
+        model.fit(X_scaled, y)
+        training_accuracy = float(model.score(X_scaled, y) * 100)
+    except Exception as exc:
+        return {"available": False, "message": f"ANN training failed: {exc}"}
+
+    return {
+        "available": True,
+        "model": model,
+        "scaler": scaler,
+        "training_samples": int(len(X)),
+        "training_source": source,
+        "training_accuracy": training_accuracy,
+        "classes": list(model.classes_),
+    }
+
+
+def predict_with_ann(item, model_result=None):
+    """Predict the subject performance level using a small feed-forward ANN."""
+    result = model_result if model_result is not None else train_ann_model()
+    if not result.get("available"):
+        return "", 0.0, result.get("message", "ANN unavailable")
+    features = np.asarray([_ann_features_from_subject(item)], dtype=float)
+    scaled = result["scaler"].transform(features)
+    prediction = str(result["model"].predict(scaled)[0])
+    probabilities = result["model"].predict_proba(scaled)[0]
+    confidence = float(np.max(probabilities) * 100)
+    return prediction, confidence, result
 
 
 def normalize_subject(data):
@@ -536,6 +649,12 @@ def create_pdf(report):
         ]))
         story.append(dt)
         story.append(Spacer(1, 5))
+        if x.get("ANN_Prediction"):
+            story.append(Paragraph(
+                f"<b>ANN Prediction:</b> {x.get('ANN_Prediction')} &nbsp;&nbsp; "
+                f"<b>ANN Confidence:</b> {float(x.get('ANN_Confidence', 0)):.1f}%",
+                small
+            ))
         story.append(Paragraph(f"<b>Complement:</b> {x.get('Compliment', '')}", small))
         story.append(Paragraph("<b>How to improve:</b> " + " ".join(x.get("Recommendations", [])), small))
         story.append(Spacer(1, 9))
@@ -1220,8 +1339,8 @@ def teacher_dashboard():
         use_container_width=True, hide_index=True
     )
 
-    tab1, tab2, tab3, tab4 = st.tabs([
-        "➕ Add Student", "📤 Upload CSV", "👥 Student Records", "📈 K-Means Analysis"
+    tab1, tab2, tab3, tab4, tab5 = st.tabs([
+        "➕ Add Student", "📤 Upload CSV", "👥 Student Records", "📈 K-Means Analysis", "🧠 ANN Analysis"
     ])
 
     with tab1:
@@ -1306,6 +1425,21 @@ def teacher_dashboard():
                 "application/pdf", use_container_width=True, type="primary"
             )
 
+    with tab5:
+        st.subheader("🧠 Artificial Neural Network (ANN) Analysis")
+        st.write("A feed-forward multilayer perceptron uses attendance, internal, assignment, previous mark and study hours as input features.")
+        ann = train_ann_model()
+        if not ann.get("available"):
+            st.warning(ann.get("message", "ANN analysis unavailable."))
+        else:
+            a, b, c = st.columns(3)
+            a.metric("Training Samples", ann["training_samples"])
+            b.metric("Training Accuracy", f'{ann["training_accuracy"]:.1f}%')
+            c.metric("Output Classes", len(ann["classes"]))
+            st.info(f'🧠 Training source: {ann["training_source"]}')
+            st.dataframe(pd.DataFrame({"ANN Output Class": ann["classes"]}), use_container_width=True, hide_index=True)
+            st.caption("ANN prediction is a project-level academic indicator. It should support, not replace, tutor evaluation.")
+
 # ============================================================
 # STUDENT WORKFLOW
 # ============================================================
@@ -1337,10 +1471,15 @@ def student_dashboard():
 
     if calculate:
         updated = []
+        ann_model_result = train_ann_model()
         for item in subjects:
             copy = dict(item)
             copy["Study_Hours"] = study_hours.get(item["Subject"], 0)
-            updated.append(normalize_subject(copy))
+            normalized = normalize_subject(copy)
+            prediction, confidence, ann_info = predict_with_ann(normalized, ann_model_result)
+            normalized["ANN_Prediction"] = prediction
+            normalized["ANN_Confidence"] = confidence
+            updated.append(normalized)
         student["Subjects_JSON"] = json.dumps(updated)
         st.session_state.student_report = student
         subjects = updated
@@ -1363,18 +1502,23 @@ def student_dashboard():
         b.markdown(f'<div class="metric-card"><div class="label">Subjects</div><div class="value">{len(subjects)}</div></div>', unsafe_allow_html=True)
         status = "Good" if overall >= 80 else "Above Average" if overall >= 65 else "Average" if overall >= 50 else "Needs Improvement"
         c.markdown(f'<div class="metric-card"><div class="label">Status</div><div class="value">{status}</div></div>', unsafe_allow_html=True)
+        ann_subjects = [x for x in subjects if x.get("ANN_Prediction")]
+        if ann_subjects:
+            st.caption("🧠 ANN: Multilayer Perceptron using Attendance, Internal, Assignment, Previous Mark and Study Hours.")
 
         rows = []
         for x in subjects:
-            rows.append([x["Subject"], f"{x['Attendance']:.0f}%", f"{x.get('Attendance_Mark', attendance_mark(x['Attendance']))}/5", f"{x['Internal']:.0f}/40", f"{x['Assignment']:.0f}/15", f"{x['Previous']:.0f}/60", f"{x['Study_Hours']:.1f} h", f"{x['Overall']:.1f}%", f"{x.get('Circle', performance_circle(x['Level']))} {x['Level']}"])
+            rows.append([x["Subject"], f"{x['Attendance']:.0f}%", f"{x.get('Attendance_Mark', attendance_mark(x['Attendance']))}/5", f"{x['Internal']:.0f}/40", f"{x['Assignment']:.0f}/15", f"{x['Previous']:.0f}/60", f"{x['Study_Hours']:.1f} h", f"{x['Overall']:.1f}%", f"{x.get('Circle', performance_circle(x['Level']))} {x['Level']}", x.get("ANN_Prediction", "—"), f"{float(x.get('ANN_Confidence', 0)):.1f}%" ])
         st.subheader("📊 Your Marks — Subject-wise Result")
-        st.dataframe(pd.DataFrame(rows, columns=["Subject", "Attendance", "Att. Mark", "Internal", "Assignment", "Previous", "Study", "Score", "Performance"]), use_container_width=True, hide_index=True)
+        st.dataframe(pd.DataFrame(rows, columns=["Subject", "Attendance", "Att. Mark", "Internal", "Assignment", "Previous", "Study", "Score", "Performance", "ANN Prediction", "ANN Confidence"]), use_container_width=True, hide_index=True)
 
         st.subheader("🎯 Subject-wise Performance & Improvement")
         for x in subjects:
             circle = x.get('Circle', performance_circle(x['Level']))
             with st.expander(f"{circle} {x['Subject']} — {x['Level']} — {x['Overall']:.1f}%"):
                 st.markdown(f"**Overall information:** Attendance **{x['Attendance']:.0f}% → {x.get('Attendance_Mark', attendance_mark(x['Attendance']))}/5**, Internal **{x['Internal']:.0f}/40**, Assignment **{x['Assignment']:.0f}/15**, Previous **{x['Previous']:.0f}/60**, Study **{x['Study_Hours']:.1f} h/day**.")
+                if x.get("ANN_Prediction"):
+                    st.info(f"🧠 ANN Prediction: **{x['ANN_Prediction']}**  •  Confidence: **{float(x.get('ANN_Confidence', 0)):.1f}%**")
                 st.success("💚 " + x.get("Compliment", "Keep progressing!"))
                 st.markdown("**How to improve:**")
                 for recommendation in x["Recommendations"]:
