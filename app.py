@@ -35,6 +35,10 @@ st.set_page_config(
 DATA_DIR = "data"
 os.makedirs(DATA_DIR, exist_ok=True)
 REPORT_FILE = os.path.join(DATA_DIR, "student_reports.csv")
+# Permanent local archive: every submitted student record is also saved as
+# an individual JSON snapshot. Tutor actions never delete archived records.
+STUDENT_RECORDS_DIR = os.path.join(DATA_DIR, "student_records")
+os.makedirs(STUDENT_RECORDS_DIR, exist_ok=True)
 
 SEMESTERS = [f"S{i}" for i in range(1, 9)]
 
@@ -304,26 +308,55 @@ def save_reports(df):
     df.to_csv(REPORT_FILE, index=False)
 
 
+def _safe_folder_name(value):
+    """Make a Windows/Linux-safe folder/file component."""
+    text = re.sub(r"[^A-Za-z0-9._-]+", "_", str(value).strip())
+    return text.strip("._") or "Unknown"
+
+
+def archive_student_record(report):
+    """Write an immutable snapshot of every submitted record to a proper folder.
+
+    Nothing in the tutor UI deletes these snapshots. A new submission creates a
+    new timestamped JSON file, so the complete history is retained.
+    """
+    department_dir = os.path.join(
+        STUDENT_RECORDS_DIR, _safe_folder_name(report.get("Department", "Unknown"))
+    )
+    semester_dir = os.path.join(
+        department_dir, _safe_folder_name(report.get("Semester", "Unknown"))
+    )
+    os.makedirs(semester_dir, exist_ok=True)
+
+    uid = _safe_folder_name(report.get("University_ID", "Unknown"))
+    timestamp = re.sub(r"[^0-9]", "", str(report.get("Created_Time", datetime.now().strftime("%Y%m%d%H%M%S"))))
+    filename = f"{uid}_{timestamp}_{datetime.now().strftime('%f')}.json"
+    path = os.path.join(semester_dir, filename)
+
+    payload = dict(report)
+    payload["Archive_Path"] = path.replace("\\", "/")
+    payload["Archived_At"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(payload, f, ensure_ascii=False, indent=2)
+    return path
+
+
 def upsert_report(report):
+    """Append-only storage. Existing student records are NEVER overwritten/deleted.
+
+    The function name is kept for compatibility with the rest of the app, but it
+    now appends every submission to the master CSV and creates an archive file.
+    """
     df = load_reports()
-    if df.empty:
-        df = pd.DataFrame([report], columns=REPORT_COLUMNS)
-    else:
-        mask = (
-            df["University_ID"].astype(str).eq(str(report["University_ID"])) &
-            df["Department"].astype(str).eq(str(report["Department"]))
-        )
-        df = df.loc[~mask].copy()
-        df = pd.concat([df, pd.DataFrame([report])], ignore_index=True)
+    new_row = pd.DataFrame([report], columns=REPORT_COLUMNS)
+    df = pd.concat([df, new_row], ignore_index=True)
     save_reports(df)
+    archive_student_record(report)
 
 
 def delete_student(uid, department):
-    df = load_reports()
-    if df.empty:
-        return
-    mask = df["University_ID"].astype(str).eq(str(uid)) & df["Department"].astype(str).eq(str(department))
-    save_reports(df.loc[~mask].copy())
+    """Disabled by design: student records are permanent and tutor cannot delete them."""
+    return False
 
 
 def get_subjects(department, semester):
@@ -576,7 +609,11 @@ def find_student(username, uid):
     ]
     if found.empty:
         return None
-    return found.iloc[0].to_dict()
+    # The newest submission is the active student record, while older
+    # submissions remain permanently stored for history/analysis.
+    if "Created_Time" in found.columns:
+        found = found.sort_values("Created_Time")
+    return found.iloc[-1].to_dict()
 
 # ============================================================
 # PDF
@@ -1334,6 +1371,7 @@ def teacher_dashboard():
         return
 
     st.success(f"📖 Active curriculum: **{department} — {semester}**")
+    st.info("🔐 Permanent storage enabled: every submitted student record is appended to the master file and archived in `data/student_records/<Department>/<Semester>/`. Tutor deletion is disabled.")
     st.dataframe(
         pd.DataFrame({"No.": range(1, 7), "Subject": subjects}),
         use_container_width=True, hide_index=True
@@ -1374,6 +1412,7 @@ def teacher_dashboard():
             df["Semester"].astype(str).str.upper().eq(str(semester).upper())
         ].copy()
         st.subheader(f"Student Records — {department} — {semester} ({len(filtered)})")
+        st.caption(f"🔒 {len(filtered)} permanent stored submission(s) in this Department + Semester. Previous submissions are retained even when the same University ID is submitted again.")
         if filtered.empty:
             st.info("No student records for this Department + Semester yet.")
         else:
@@ -1389,10 +1428,7 @@ def teacher_dashboard():
             st.dataframe(pd.DataFrame(rows, columns=["Subject", "Attendance", "Internal", "Assignment", "Previous", "Score", "Performance"]), use_container_width=True, hide_index=True)
             c1, c2 = st.columns(2)
             c1.download_button("📥 Download Student PDF", create_pdf(row), f"{selected}_Progress_Report.pdf", "application/pdf", use_container_width=True)
-            if c2.button("🗑️ Delete Selected Student", use_container_width=True):
-                delete_student(selected, department)
-                st.success("Student deleted.")
-                st.rerun()
+            c2.info("🔒 Permanent record — tutor deletion is disabled.")
 
     with tab4:
         st.subheader(f"📈 K-Means Analysis — {department} — {semester}")
