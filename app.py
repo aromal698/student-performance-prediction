@@ -42,7 +42,6 @@ st.set_page_config(
 # ============================================================
 
 APP_TITLE = "STUDENT PERFORMANCE PREDICTION SYSTEM"
-APP_SUBTITLE = "AI-Powered Academic Performance Monitoring System"
 
 # ============================================================
 # FOLDERS / DATABASE
