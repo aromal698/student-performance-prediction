@@ -354,9 +354,50 @@ def upsert_report(report):
     archive_student_record(report)
 
 
-def delete_student(uid, department):
-    """Disabled by design: student records are permanent and tutor cannot delete them."""
-    return False
+def delete_student_record(report):
+    """Delete one stored student submission. This function is called only from
+    the authenticated Tutor Dashboard. The matching master CSV row and its
+    archived JSON snapshot are removed together.
+    """
+    df = load_reports()
+    if df.empty:
+        return False, "No stored records found."
+
+    uid = str(report.get("University_ID", "")).strip()
+    department = str(report.get("Department", "")).strip()
+    semester = str(report.get("Semester", "")).strip()
+    created = str(report.get("Created_Time", "")).strip()
+
+    mask = (
+        df["University_ID"].astype(str).str.strip().eq(uid) &
+        df["Department"].astype(str).str.strip().eq(department) &
+        df["Semester"].astype(str).str.strip().str.upper().eq(semester.upper()) &
+        df["Created_Time"].astype(str).str.strip().eq(created)
+    )
+    if not mask.any():
+        return False, "The selected record could not be found."
+
+    save_reports(df.loc[~mask].copy())
+
+    # Remove the corresponding archived JSON snapshot(s).
+    archive_dir = os.path.join(
+        STUDENT_RECORDS_DIR,
+        _safe_folder_name(department),
+        _safe_folder_name(semester),
+    )
+    removed_files = 0
+    if os.path.isdir(archive_dir):
+        timestamp = re.sub(r"[^0-9]", "", created)
+        prefix = f"{_safe_folder_name(uid)}_{timestamp}_"
+        for filename in os.listdir(archive_dir):
+            if filename.startswith(prefix) and filename.lower().endswith(".json"):
+                try:
+                    os.remove(os.path.join(archive_dir, filename))
+                    removed_files += 1
+                except OSError:
+                    pass
+
+    return True, f"Deleted 1 student submission and {removed_files} archived file(s)."
 
 
 def get_subjects(department, semester):
@@ -1371,7 +1412,7 @@ def teacher_dashboard():
         return
 
     st.success(f"📖 Active curriculum: **{department} — {semester}**")
-    st.info("🔐 Permanent storage enabled: every submitted student record is appended to the master file and archived in `data/student_records/<Department>/<Semester>/`. Tutor deletion is disabled.")
+    st.info("🔐 Permanent storage enabled: every submitted student record is saved in the master file and archived in `data/student_records/<Department>/<Semester>/`. Only the authenticated Tutor Dashboard can delete a selected record.")
     st.dataframe(
         pd.DataFrame({"No.": range(1, 7), "Subject": subjects}),
         use_container_width=True, hide_index=True
@@ -1428,7 +1469,25 @@ def teacher_dashboard():
             st.dataframe(pd.DataFrame(rows, columns=["Subject", "Attendance", "Internal", "Assignment", "Previous", "Score", "Performance"]), use_container_width=True, hide_index=True)
             c1, c2 = st.columns(2)
             c1.download_button("📥 Download Student PDF", create_pdf(row), f"{selected}_Progress_Report.pdf", "application/pdf", use_container_width=True)
-            c2.info("🔒 Permanent record — tutor deletion is disabled.")
+            with c2:
+                st.warning("⚠️ Tutor-only action")
+                confirm_delete = st.checkbox(
+                    "I confirm I want to delete this stored submission",
+                    key=f"confirm_delete_{selected}_{row.get('Created_Time','')}"
+                )
+                if st.button(
+                    "🗑️ Delete Selected Student Record",
+                    key=f"delete_record_{selected}_{row.get('Created_Time','')}",
+                    type="secondary",
+                    use_container_width=True,
+                    disabled=not confirm_delete,
+                ):
+                    ok, message = delete_student_record(row)
+                    if ok:
+                        st.success(f"✅ {message}")
+                        st.rerun()
+                    else:
+                        st.error(message)
 
     with tab4:
         st.subheader(f"📈 K-Means Analysis — {department} — {semester}")
