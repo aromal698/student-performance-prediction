@@ -9,7 +9,15 @@ from datetime import datetime
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.enums import TA_CENTER
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+from reportlab.lib import colors
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak
+
+try:
+    from sklearn.cluster import KMeans
+    from sklearn.preprocessing import StandardScaler
+    SKLEARN_AVAILABLE = True
+except Exception:
+    SKLEARN_AVAILABLE = False
 
 # ============================================================
 # CONFIG
@@ -261,14 +269,41 @@ def parse_subjects(raw):
 # ============================================================
 # PERFORMANCE CALCULATION
 # ============================================================
-def normalize_subject(data):
-    attendance = float(data.get("Attendance", 0))
-    study = float(data.get("Study_Hours", 0))
-    internal = float(data.get("Internal", 0))
-    assignment = float(data.get("Assignment", 0))
-    previous = float(data.get("Previous", 0))
+def attendance_mark(attendance):
+    """Convert attendance percentage to the requested 5-point mark."""
+    a = float(attendance)
+    if 90 <= a <= 100:
+        return 5
+    if 80 <= a < 90:
+        return 4
+    if 70 <= a < 80:
+        return 3
+    if 60 <= a < 70:
+        return 2
+    if 10 <= a < 60:
+        return 1
+    return 0
 
-    attendance_score = attendance
+
+def performance_circle(level):
+    return {
+        "Needs Improvement": "🔴",
+        "Average": "🟠",
+        "Above Average": "🟡",
+        "Good": "🟢",
+    }.get(level, "⚪")
+
+
+def normalize_subject(data):
+    attendance = max(0.0, min(float(data.get("Attendance", 0)), 100.0))
+    study = max(0.0, min(float(data.get("Study_Hours", 0)), 6.0))
+    internal = max(0.0, min(float(data.get("Internal", 0)), 40.0))
+    assignment = max(0.0, min(float(data.get("Assignment", 0)), 15.0))
+    previous = max(0.0, min(float(data.get("Previous", 0)), 60.0))
+
+    # Requested attendance conversion: percentage -> 5-point mark.
+    att_mark = attendance_mark(attendance)
+    attendance_score = att_mark / 5 * 100
     study_score = min(study / 6 * 100, 100)
     internal_score = internal / 40 * 100
     assignment_score = assignment / 15 * 100
@@ -285,29 +320,42 @@ def normalize_subject(data):
         level = "Needs Improvement"
 
     recommendations = []
-    if attendance < 75:
-        recommendations.append("Improve attendance and attend classes regularly.")
+    complements = []
+    if level == "Good":
+        complements.append("Excellent work! Keep this consistency and continue practising regularly.")
+    elif level == "Above Average":
+        complements.append("Good progress. A small increase in internal marks and regular practice can move this subject higher.")
+    elif level == "Average":
+        complements.append("You are progressing. Focus on consistent study and improve internal/assignment marks step by step.")
+    else:
+        complements.append("Do not worry—this can improve with a simple, consistent study plan and regular class participation.")
+
+    if attendance < 90:
+        recommendations.append("Improve attendance; regular class participation can raise the attendance mark.")
     if study < 2:
-        recommendations.append("Increase daily study time gradually.")
+        recommendations.append("Increase daily study time gradually to at least 2 hours for this subject.")
     if internal < 20:
-        recommendations.append("Revise internal-exam topics and practise questions.")
+        recommendations.append("Revise internal-exam topics and practise previous questions to improve internal marks.")
     if assignment < 8:
-        recommendations.append("Complete assignments on time and review corrections.")
+        recommendations.append("Complete assignments on time and use tutor feedback to improve marks.")
     if previous < 30:
-        recommendations.append("Revise previous topics before starting new chapters.")
+        recommendations.append("Revise previous topics and practise short questions before moving to new chapters.")
     if not recommendations:
-        recommendations.append("Maintain the current study routine and continue practising.")
+        recommendations.append("Maintain the current routine and continue regular revision and practice.")
 
     return {
         "Subject": data["Subject"],
         "Attendance": attendance,
+        "Attendance_Mark": att_mark,
         "Study_Hours": study,
         "Internal": internal,
         "Assignment": assignment,
         "Previous": previous,
         "Overall": overall,
         "Level": level,
+        "Circle": performance_circle(level),
         "Recommendations": recommendations,
+        "Compliment": complements[0],
     }
 
 
@@ -339,41 +387,114 @@ def find_student(username, uid):
 # PDF
 # ============================================================
 def create_pdf(report):
+    """Detailed student progress report with overall and subject-wise information."""
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=28, leftMargin=28, topMargin=28, bottomMargin=28)
     styles = getSampleStyleSheet()
     title = ParagraphStyle("title", parent=styles["Title"], alignment=TA_CENTER, fontSize=18, spaceAfter=12)
+    small = ParagraphStyle("small", parent=styles["Normal"], fontSize=8, leading=10)
     story = [Paragraph("Student Performance Progress Report", title)]
-    story.append(Paragraph(f"<b>Name:</b> {report['Student_Name']}", styles["Normal"]))
-    story.append(Paragraph(f"<b>Username:</b> {report['Username']}", styles["Normal"]))
-    story.append(Paragraph(f"<b>University ID:</b> {report['University_ID']}", styles["Normal"]))
-    story.append(Paragraph(f"<b>Semester:</b> {report['Semester']}", styles["Normal"]))
-    story.append(Paragraph(f"<b>Department:</b> {report['Department']}", styles["Normal"]))
-    story.append(Spacer(1, 12))
+    story += [
+        Paragraph(f"<b>Name:</b> {report['Student_Name']}", styles["Normal"]),
+        Paragraph(f"<b>Username:</b> {report['Username']}", styles["Normal"]),
+        Paragraph(f"<b>University ID:</b> {report['University_ID']}", styles["Normal"]),
+        Paragraph(f"<b>Semester:</b> {report['Semester']}", styles["Normal"]),
+        Paragraph(f"<b>Department:</b> {report['Department']}", styles["Normal"]),
+        Spacer(1, 10),
+    ]
 
     subjects = parse_subjects(report["Subjects_JSON"])
     overall = float(np.mean([x["Overall"] for x in subjects])) if subjects else 0
-    story.append(Paragraph(f"<b>Overall Performance:</b> {overall:.2f}%", styles["Heading2"]))
-    story.append(Spacer(1, 8))
+    overall_level = "Good" if overall >= 80 else "Above Average" if overall >= 65 else "Average" if overall >= 50 else "Needs Improvement"
+    story.append(Paragraph(f"<b>Overall Performance:</b> {overall:.2f}% &nbsp;&nbsp; <b>Status:</b> {performance_circle(overall_level)} {overall_level}", styles["Heading2"]))
+    story.append(Paragraph(f"<b>Subjects:</b> {len(subjects)} &nbsp;&nbsp; <b>Average Attendance:</b> {np.mean([x['Attendance'] for x in subjects]):.1f}% &nbsp;&nbsp; <b>Average Internal:</b> {np.mean([x['Internal'] for x in subjects]):.1f}/40", small))
+    story.append(Spacer(1, 10))
 
-    data = [["Subject", "Attendance", "Internal", "Assignment", "Previous", "Study h", "Score", "Level"]]
+    summary = [["Subject", "Attendance", "Att. Mark", "Internal", "Assignment", "Previous", "Study", "Score", "Status"]]
     for x in subjects:
-        data.append([
-            x["Subject"], f"{x['Attendance']:.0f}%", f"{x['Internal']:.0f}/40",
-            f"{x['Assignment']:.0f}/15", f"{x['Previous']:.0f}/60",
-            f"{x['Study_Hours']:.1f}", f"{x['Overall']:.1f}%", x["Level"]
+        dot_color = {
+            "Needs Improvement": "#dc2626", "Average": "#f97316",
+            "Above Average": "#eab308", "Good": "#16a34a"
+        }.get(x["Level"], "#64748b")
+        status = Paragraph(f'<font color="{dot_color}">●</font> {x["Level"]}', small)
+        summary.append([
+            x["Subject"], f"{x['Attendance']:.0f}%", f"{x.get('Attendance_Mark', attendance_mark(x['Attendance']))}/5",
+            f"{x['Internal']:.0f}/40", f"{x['Assignment']:.0f}/15", f"{x['Previous']:.0f}/60",
+            f"{x['Study_Hours']:.1f} h", f"{x['Overall']:.1f}%", status
         ])
-    table = Table(data, repeatRows=1)
+    table = Table(summary, repeatRows=1, colWidths=[92, 48, 45, 48, 52, 50, 42, 45, 70])
     table.setStyle(TableStyle([
-        ("BACKGROUND", (0, 0), (-1, 0), (0.12, 0.20, 0.35)),
-        ("TEXTCOLOR", (0, 0), (-1, 0), (1, 1, 1)),
-        ("GRID", (0, 0), (-1, -1), 0.5, (0.7, 0.7, 0.7)),
-        ("FONTSIZE", (0, 0), (-1, -1), 7),
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#172554")),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+        ("GRID", (0, 0), (-1, -1), 0.4, colors.grey),
+        ("FONTSIZE", (0, 0), (-1, -1), 6.5),
         ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
     ]))
+    story.append(Paragraph("Overall Information — All Subjects", styles["Heading2"]))
     story.append(table)
     story.append(Spacer(1, 12))
-    story.append(Paragraph("Performance levels are project-defined indicators and are not official university grades.", styles["Italic"]))
+
+    story.append(Paragraph("Subject-wise Detailed Information", styles["Heading2"]))
+    for i, x in enumerate(subjects, 1):
+        dot_color = {"Needs Improvement": "#dc2626", "Average": "#f97316", "Above Average": "#eab308", "Good": "#16a34a"}.get(x["Level"], "#64748b")
+        story.append(Paragraph(f'{i}. {x["Subject"]} — <font color="{dot_color}">●</font> {x["Level"]} ({x["Overall"]:.1f}%)', styles["Heading3"]))
+        detail = [
+            ["Attendance", f"{x['Attendance']:.0f}%", "Attendance Mark", f"{x.get('Attendance_Mark', attendance_mark(x['Attendance']))}/5"],
+            ["Internal", f"{x['Internal']:.0f}/40", "Assignment", f"{x['Assignment']:.0f}/15"],
+            ["Previous Mark", f"{x['Previous']:.0f}/60", "Study Hours", f"{x['Study_Hours']:.1f} h/day"],
+            ["Overall Score", f"{x['Overall']:.1f}%", "Performance", f"{x['Level']}"]
+        ]
+        dt = Table(detail, colWidths=[95, 75, 95, 75])
+        dt.setStyle(TableStyle([
+            ("GRID", (0,0), (-1,-1), 0.4, colors.grey),
+            ("BACKGROUND", (0,0), (0,-1), colors.HexColor("#eef2ff")),
+            ("BACKGROUND", (2,0), (2,-1), colors.HexColor("#eef2ff")),
+            ("FONTSIZE", (0,0), (-1,-1), 8),
+            ("VALIGN", (0,0), (-1,-1), "MIDDLE"),
+        ]))
+        story.append(dt)
+        story.append(Spacer(1, 5))
+        story.append(Paragraph(f"<b>Complement:</b> {x.get('Compliment', '')}", small))
+        story.append(Paragraph("<b>How to improve:</b> " + " ".join(x.get("Recommendations", [])), small))
+        story.append(Spacer(1, 9))
+
+    story.append(Paragraph("Performance indicators are project-defined indicators and are not official university grades.", styles["Italic"]))
+    doc.build(story)
+    buffer.seek(0)
+    return buffer.getvalue()
+
+
+def create_kmeans_pdf(cluster_result):
+    """Create a separate tutor analysis PDF containing K-Means calculations."""
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=28, leftMargin=28, topMargin=28, bottomMargin=28)
+    styles = getSampleStyleSheet()
+    title = ParagraphStyle("k_title", parent=styles["Title"], alignment=TA_CENTER, fontSize=18, spaceAfter=12)
+    story = [Paragraph("Tutor Dashboard — K-Means Clustering Analysis", title)]
+    if not cluster_result.get("available"):
+        story.append(Paragraph(cluster_result.get("message", "K-Means analysis unavailable."), styles["Normal"]))
+    else:
+        story.append(Paragraph(f"<b>Students/subject records analysed:</b> {cluster_result['n_samples']}", styles["Normal"]))
+        story.append(Paragraph(f"<b>Number of clusters (K):</b> {cluster_result['k']}", styles["Normal"]))
+        story.append(Paragraph("Features used: Attendance Mark, Internal, Assignment, Previous Mark and Study Hours.", styles["Normal"]))
+        story.append(Spacer(1, 10))
+        story.append(Paragraph("Cluster Summary", styles["Heading2"]))
+        rows = [["Cluster", "Records", "Avg Score", "Interpretation"]]
+        for c in cluster_result["summary"]:
+            rows.append([str(c["cluster"]), str(c["records"]), f"{c['avg_score']:.2f}%", c["interpretation"]])
+        t = Table(rows, repeatRows=1)
+        t.setStyle(TableStyle([("BACKGROUND",(0,0),(-1,0),colors.HexColor("#172554")),("TEXTCOLOR",(0,0),(-1,0),colors.white),("GRID",(0,0),(-1,-1),0.4,colors.grey),("FONTSIZE",(0,0),(-1,-1),8)]))
+        story.append(t)
+        story.append(Spacer(1, 12))
+        story.append(Paragraph("K-Means Calculation / Centroids", styles["Heading2"]))
+        cent = [["Cluster", "Attendance Mark", "Internal", "Assignment", "Previous", "Study Hours"]]
+        for row in cluster_result["centroids"]:
+            cent.append([row["cluster"], f"{row['attendance_mark']:.2f}", f"{row['internal']:.2f}", f"{row['assignment']:.2f}", f"{row['previous']:.2f}", f"{row['study_hours']:.2f}"])
+        ct = Table(cent, repeatRows=1)
+        ct.setStyle(TableStyle([("BACKGROUND",(0,0),(-1,0),colors.HexColor("#334155")),("TEXTCOLOR",(0,0),(-1,0),colors.white),("GRID",(0,0),(-1,-1),0.4,colors.grey),("FONTSIZE",(0,0),(-1,-1),7)]))
+        story.append(ct)
+        story.append(Spacer(1, 12))
+        story.append(Paragraph("The clustering is an analytical grouping for the tutor dashboard. It does not replace the subject performance indicator or official university grading.", styles["Italic"]))
     doc.build(story)
     buffer.seek(0)
     return buffer.getvalue()
@@ -510,6 +631,53 @@ def student_login():
             st.error("No matching student record found. Check Username and University ID.")
 
 # ============================================================
+# K-MEANS TUTOR ANALYSIS
+# ============================================================
+def kmeans_analysis(department):
+    if not SKLEARN_AVAILABLE:
+        return {"available": False, "message": "scikit-learn is not installed. Install it with: pip install scikit-learn"}
+    df = load_reports()
+    if df.empty:
+        return {"available": False, "message": "No student records are available for clustering."}
+    df = df[df["Department"].astype(str).eq(str(department))].copy()
+    records = []
+    for _, row in df.iterrows():
+        for x in parse_subjects(row["Subjects_JSON"]):
+            records.append({
+                "University_ID": row["University_ID"], "Student_Name": row["Student_Name"],
+                "Subject": x["Subject"], "Attendance_Mark": x.get("Attendance_Mark", attendance_mark(x.get("Attendance", 0))),
+                "Internal": float(x.get("Internal", 0)), "Assignment": float(x.get("Assignment", 0)),
+                "Previous": float(x.get("Previous", 0)), "Study_Hours": float(x.get("Study_Hours", 0)),
+                "Overall": float(x.get("Overall", 0)),
+            })
+    if len(records) < 2:
+        return {"available": False, "message": "At least 2 subject records are required for K-Means analysis."}
+    raw = pd.DataFrame(records)
+    features = ["Attendance_Mark", "Internal", "Assignment", "Previous", "Study_Hours"]
+    X = raw[features].astype(float).values
+    scaler = StandardScaler()
+    Xs = scaler.fit_transform(X)
+    k = min(4, len(raw))
+    model = KMeans(n_clusters=k, random_state=42, n_init=10)
+    raw["Cluster"] = model.fit_predict(Xs)
+    means = raw.groupby("Cluster")["Overall"].mean().sort_values()
+    order = {cluster: rank for rank, cluster in enumerate(means.index)}
+    labels = {0: "Low-performance group", 1: "Average-performance group", 2: "Above-average group", 3: "Good-performance group"}
+    raw["Cluster_Order"] = raw["Cluster"].map(order)
+    summary=[]
+    for cluster, g in raw.groupby("Cluster"):
+        rank=order[cluster]
+        summary.append({"cluster": int(cluster)+1, "records": int(len(g)), "avg_score": float(g["Overall"].mean()), "interpretation": labels.get(rank, "Performance group")})
+    centroids=[]
+    # Convert standardized centroids back to original units for readable calculations.
+    original_centroids = scaler.inverse_transform(model.cluster_centers_)
+    for cluster in range(k):
+        rank=order[cluster]
+        centroids.append({"cluster": f"{cluster+1} ({labels.get(rank, 'Group')})", "attendance_mark": float(original_centroids[cluster,0]), "internal": float(original_centroids[cluster,1]), "assignment": float(original_centroids[cluster,2]), "previous": float(original_centroids[cluster,3]), "study_hours": float(original_centroids[cluster,4])})
+    return {"available": True, "n_samples": len(raw), "k": k, "summary": summary, "centroids": centroids, "records": raw}
+
+
+# ============================================================
 # TUTOR WORKFLOW
 # ============================================================
 def manual_add_form():
@@ -564,7 +732,7 @@ def teacher_dashboard():
     c2.button("🚪 Logout", on_click=logout, use_container_width=True)
     st.info(f"Assigned department: **{department}**")
 
-    tab1, tab2, tab3 = st.tabs(["➕ Add Student", "📤 Upload CSV", "👥 Student Records"])
+    tab1, tab2, tab3, tab4 = st.tabs(["➕ Add Student", "📤 Upload CSV", "👥 Student Records", "📈 K-Means Analysis"])
 
     with tab1:
         manual_add_form()
@@ -611,6 +779,24 @@ def teacher_dashboard():
             delete_student(selected, department)
             st.success("Student deleted.")
             st.rerun()
+
+    with tab4:
+        st.subheader("📈 Tutor Performance Analysis — K-Means")
+        st.write("K-Means groups the available student-subject records using attendance mark, internal, assignment, previous mark and study hours.")
+        result = kmeans_analysis(department)
+        if not result.get("available"):
+            st.warning(result.get("message", "Analysis unavailable."))
+        else:
+            st.metric("Subject records analysed", result["n_samples"])
+            st.metric("Clusters", result["k"])
+            st.dataframe(pd.DataFrame(result["summary"]), use_container_width=True, hide_index=True)
+            st.markdown("### Cluster centroids / calculations")
+            st.dataframe(pd.DataFrame(result["centroids"]), use_container_width=True, hide_index=True)
+            st.markdown("### Subject records with cluster")
+            display = result["records"][["University_ID", "Student_Name", "Subject", "Attendance_Mark", "Internal", "Assignment", "Previous", "Study_Hours", "Overall", "Cluster"]].copy()
+            display["Cluster"] = display["Cluster"].apply(lambda x: int(x)+1)
+            st.dataframe(display, use_container_width=True, hide_index=True)
+            st.download_button("📊 Download K-Means Analysis PDF", create_kmeans_pdf(result), f"{department.replace(' ', '_')}_KMeans_Analysis.pdf", "application/pdf", use_container_width=True, type="primary")
 
 # ============================================================
 # STUDENT WORKFLOW
@@ -669,15 +855,21 @@ def student_dashboard():
 
         rows = []
         for x in subjects:
-            rows.append([x["Subject"], f"{x['Attendance']:.0f}%", f"{x['Internal']:.0f}/40", f"{x['Assignment']:.0f}/15", f"{x['Previous']:.0f}/60", f"{x['Study_Hours']:.1f} h", f"{x['Overall']:.1f}%", x["Level"]])
+            rows.append([x["Subject"], f"{x['Attendance']:.0f}%", f"{x.get('Attendance_Mark', attendance_mark(x['Attendance']))}/5", f"{x['Internal']:.0f}/40", f"{x['Assignment']:.0f}/15", f"{x['Previous']:.0f}/60", f"{x['Study_Hours']:.1f} h", f"{x['Overall']:.1f}%", f"{x.get('Circle', performance_circle(x['Level']))} {x['Level']}"])
         st.subheader("📊 Subject-wise Result")
-        st.dataframe(pd.DataFrame(rows, columns=["Subject", "Attendance", "Internal", "Assignment", "Previous", "Study", "Score", "Performance"]), use_container_width=True, hide_index=True)
+        st.dataframe(pd.DataFrame(rows, columns=["Subject", "Attendance", "Att. Mark", "Internal", "Assignment", "Previous", "Study", "Score", "Performance"]), use_container_width=True, hide_index=True)
 
-        st.subheader("💡 Feedback")
+        st.subheader("🎯 Subject-wise Performance & Improvement")
         for x in subjects:
-            with st.expander(f"{x['Subject']} — {x['Level']} — {x['Overall']:.1f}%"):
+            circle = x.get('Circle', performance_circle(x['Level']))
+            with st.expander(f"{circle} {x['Subject']} — {x['Level']} — {x['Overall']:.1f}%"):
+                st.markdown(f"**Overall information:** Attendance **{x['Attendance']:.0f}% → {x.get('Attendance_Mark', attendance_mark(x['Attendance']))}/5**, Internal **{x['Internal']:.0f}/40**, Assignment **{x['Assignment']:.0f}/15**, Previous **{x['Previous']:.0f}/60**, Study **{x['Study_Hours']:.1f} h/day**.")
+                st.success("💚 " + x.get("Compliment", "Keep progressing!"))
+                st.markdown("**How to improve:**")
                 for recommendation in x["Recommendations"]:
                     st.write("• " + recommendation)
+
+        st.caption("🔴 Needs Improvement  •  🟠 Average  •  🟡 Above Average  •  🟢 Good")
 
         st.download_button(
             "📥 Download Progress Report PDF",
