@@ -623,35 +623,195 @@ def build_all_department_analysis():
     return records, summary, float(records["Overall"].mean())
 
 
-def create_all_department_pdf(records, summary, overall_average):
+def all_department_kmeans_analysis():
+    """Run one K-Means analysis across subject records from every department."""
+    if not SKLEARN_AVAILABLE:
+        return {"available": False, "message": "scikit-learn is not installed. Run: pip install scikit-learn"}
+
+    df = load_reports()
+    if df.empty:
+        return {"available": False, "message": "No student records are available for K-Means analysis."}
+
+    records = []
+    for _, row in df.iterrows():
+        for item in parse_subjects(row.get("Subjects_JSON", "[]")):
+            try:
+                records.append({
+                    "Department": str(row.get("Department", "Unknown")),
+                    "Semester": str(row.get("Semester", "Unknown")),
+                    "University_ID": str(row.get("University_ID", "")),
+                    "Student_Name": str(row.get("Student_Name", "")),
+                    "Subject": str(item.get("Subject", "Unknown")),
+                    "Attendance_Mark": float(item.get("Attendance_Mark", attendance_mark(item.get("Attendance", 0)))),
+                    "Internal": float(item.get("Internal", 0)),
+                    "Assignment": float(item.get("Assignment", 0)),
+                    "Previous": float(item.get("Previous", 0)),
+                    "Study_Hours": float(item.get("Study_Hours", 0)),
+                    "Overall": float(item.get("Overall", 0)),
+                })
+            except (TypeError, ValueError):
+                continue
+
+    if not records:
+        return {"available": False, "message": "Student records were found, but no valid subject data could be read."}
+
+    raw = pd.DataFrame(records)
+    features = ["Attendance_Mark", "Internal", "Assignment", "Previous", "Study_Hours"]
+    raw[features] = raw[features].apply(pd.to_numeric, errors="coerce").fillna(0.0)
+    raw["Overall"] = pd.to_numeric(raw["Overall"], errors="coerce").fillna(0.0)
+
+    k = min(4, len(raw))
+    scaler = StandardScaler()
+    try:
+        X_scaled = scaler.fit_transform(raw[features].to_numpy(dtype=float))
+        model = KMeans(n_clusters=k, random_state=42, n_init=10)
+        raw["Cluster"] = model.fit_predict(X_scaled) + 1
+    except Exception as exc:
+        return {"available": False, "message": f"K-Means could not be calculated: {exc}"}
+
+    # Give cluster numbers a stable performance interpretation without treating
+    # the clusters as official grades.
+    means = raw.groupby("Cluster")["Overall"].mean().sort_values()
+    rank_by_cluster = {int(cluster): rank for rank, cluster in enumerate(means.index)}
+    labels = {
+        0: "Low-performance group",
+        1: "Average-performance group",
+        2: "Above-average group",
+        3: "Good-performance group",
+    }
+
+    summary = []
+    for cluster in sorted(raw["Cluster"].unique()):
+        group = raw[raw["Cluster"] == cluster]
+        summary.append({
+            "Cluster": int(cluster),
+            "Records": int(len(group)),
+            "Students": int(group["University_ID"].nunique()),
+            "Departments": int(group["Department"].nunique()),
+            "Average_Overall": float(group["Overall"].mean()),
+            "Interpretation": labels.get(rank_by_cluster[int(cluster)], "Performance group"),
+        })
+
+    original_centroids = scaler.inverse_transform(model.cluster_centers_)
+    centroids = []
+    for cluster_zero in range(k):
+        cluster_number = cluster_zero + 1
+        centroids.append({
+            "Cluster": cluster_number,
+            "Attendance_Mark": float(original_centroids[cluster_zero, 0]),
+            "Internal": float(original_centroids[cluster_zero, 1]),
+            "Assignment": float(original_centroids[cluster_zero, 2]),
+            "Previous": float(original_centroids[cluster_zero, 3]),
+            "Study_Hours": float(original_centroids[cluster_zero, 4]),
+            "Interpretation": labels.get(rank_by_cluster.get(cluster_number, 0), "Performance group"),
+        })
+
+    department_cluster = (
+        raw.groupby(["Department", "Cluster"], as_index=False)
+        .agg(Records=("University_ID", "size"), Students=("University_ID", "nunique"),
+             Average_Overall=("Overall", "mean"))
+        .sort_values(["Department", "Cluster"])
+    )
+
+    return {
+        "available": True,
+        "n_samples": len(raw),
+        "n_students": int(raw["University_ID"].nunique()),
+        "n_departments": int(raw["Department"].nunique()),
+        "k": k,
+        "summary": summary,
+        "centroids": centroids,
+        "department_cluster": department_cluster,
+        "records": raw,
+        "features": features,
+        "inertia": float(model.inertia_),
+    }
+
+
+def create_all_department_kmeans_pdf(result):
+    """Create one PDF containing the complete all-department K-Means analysis."""
     buffer = io.BytesIO()
-    doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=28, leftMargin=28, topMargin=28, bottomMargin=28)
+    doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=24, leftMargin=24, topMargin=24, bottomMargin=24)
     styles = getSampleStyleSheet()
-    title = ParagraphStyle("all_title", parent=styles["Title"], alignment=TA_CENTER, fontSize=18, spaceAfter=12)
-    story = [Paragraph("EduPredict SPP — All Department Analysis", title)]
-    if records.empty:
-        story.append(Paragraph("No student records are available for analysis.", styles["Normal"]))
-    else:
-        story.append(Paragraph(f"<b>Total student records:</b> {len(records)}", styles["Normal"]))
-        story.append(Paragraph(f"<b>Overall average performance:</b> {overall_average:.2f}%", styles["Normal"]))
-        story.append(Spacer(1, 10))
-        story.append(Paragraph("Department Summary", styles["Heading2"]))
-        data = [["Department", "Students", "Avg Score", "Avg Attendance", "Avg Internal"]]
-        for _, r in summary.iterrows():
-            data.append([str(r["Department"]), str(int(r["Students"])), f"{r['Average_Overall']:.2f}%", f"{r['Average_Attendance']:.2f}%", f"{r['Average_Internal']:.2f}/40"])
-        t = Table(data, repeatRows=1, colWidths=[210,55,65,75,65])
-        t.setStyle(TableStyle([("BACKGROUND",(0,0),(-1,0),colors.HexColor("#172554")),("TEXTCOLOR",(0,0),(-1,0),colors.white),("GRID",(0,0),(-1,-1),0.4,colors.grey),("FONTSIZE",(0,0),(-1,-1),7),("VALIGN",(0,0),(-1,-1),"MIDDLE")]))
-        story.append(t)
-        story.append(Spacer(1, 12))
-        story.append(Paragraph("Student-level Overview", styles["Heading2"]))
-        student_data = [["Department", "Semester", "University ID", "Student", "Score"]]
-        for _, r in records.sort_values(["Department", "Semester", "Student_Name"]).iterrows():
-            student_data.append([str(r["Department"]), str(r["Semester"]), str(r["University_ID"]), str(r["Student_Name"]), f"{r['Overall']:.2f}%"])
-        st = Table(student_data, repeatRows=1, colWidths=[145,45,70,150,45])
-        st.setStyle(TableStyle([("BACKGROUND",(0,0),(-1,0),colors.HexColor("#334155")),("TEXTCOLOR",(0,0),(-1,0),colors.white),("GRID",(0,0),(-1,-1),0.3,colors.grey),("FONTSIZE",(0,0),(-1,-1),6.5)]))
-        story.append(st)
-        story.append(Spacer(1, 12))
-        story.append(Paragraph("This report is an academic dashboard analysis based on records entered into EduPredict SPP. Performance indicators are project-defined and are not official university grades.", styles["Italic"]))
+    title = ParagraphStyle("all_k_title", parent=styles["Title"], alignment=TA_CENTER, fontSize=17, spaceAfter=10)
+    small = ParagraphStyle("all_k_small", parent=styles["Normal"], fontSize=7.5, leading=9)
+    story = [Paragraph("EduPredict SPP — All Department K-Means Clustering Analysis", title)]
+
+    if not result.get("available"):
+        story.append(Paragraph(result.get("message", "K-Means analysis unavailable."), styles["Normal"]))
+        doc.build(story)
+        buffer.seek(0)
+        return buffer.getvalue()
+
+    story.append(Paragraph(
+        f"<b>Students:</b> {result['n_students']} &nbsp;&nbsp; "
+        f"<b>Departments:</b> {result['n_departments']} &nbsp;&nbsp; "
+        f"<b>Subject records:</b> {result['n_samples']} &nbsp;&nbsp; "
+        f"<b>K:</b> {result['k']} &nbsp;&nbsp; <b>Inertia:</b> {result['inertia']:.4f}", small))
+    story.append(Paragraph("Features: Attendance Mark, Internal, Assignment, Previous Mark and Study Hours.", small))
+    story.append(Spacer(1, 8))
+
+    story.append(Paragraph("1. Overall Cluster Summary", styles["Heading2"]))
+    data = [["Cluster", "Records", "Students", "Departments", "Avg Overall", "Interpretation"]]
+    for r in result["summary"]:
+        data.append([str(r["Cluster"]), str(r["Records"]), str(r["Students"]), str(r["Departments"]), f"{r['Average_Overall']:.2f}%", r["Interpretation"]])
+    t = Table(data, repeatRows=1, colWidths=[45,48,48,58,65,170])
+    t.setStyle(TableStyle([
+        ("BACKGROUND", (0,0), (-1,0), colors.HexColor("#172554")),
+        ("TEXTCOLOR", (0,0), (-1,0), colors.white),
+        ("GRID", (0,0), (-1,-1), 0.35, colors.grey),
+        ("FONTSIZE", (0,0), (-1,-1), 6.8),
+        ("VALIGN", (0,0), (-1,-1), "MIDDLE"),
+    ]))
+    story.append(t)
+    story.append(Spacer(1, 10))
+
+    story.append(Paragraph("2. Department-wise Cluster Table", styles["Heading2"]))
+    data = [["Department", "Cluster", "Records", "Students", "Avg Overall"]]
+    for _, r in result["department_cluster"].iterrows():
+        data.append([str(r["Department"]), str(int(r["Cluster"])), str(int(r["Records"])), str(int(r["Students"])), f"{r['Average_Overall']:.2f}%"])
+    t = Table(data, repeatRows=1, colWidths=[245,55,55,55,65])
+    t.setStyle(TableStyle([
+        ("BACKGROUND", (0,0), (-1,0), colors.HexColor("#334155")),
+        ("TEXTCOLOR", (0,0), (-1,0), colors.white),
+        ("GRID", (0,0), (-1,-1), 0.35, colors.grey),
+        ("FONTSIZE", (0,0), (-1,-1), 6.7),
+    ]))
+    story.append(t)
+    story.append(Spacer(1, 10))
+
+    story.append(Paragraph("3. K-Means Centroids", styles["Heading2"]))
+    data = [["Cluster", "Attendance", "Internal", "Assignment", "Previous", "Study Hrs", "Interpretation"]]
+    for r in result["centroids"]:
+        data.append([str(r["Cluster"]), f"{r['Attendance_Mark']:.2f}", f"{r['Internal']:.2f}", f"{r['Assignment']:.2f}", f"{r['Previous']:.2f}", f"{r['Study_Hours']:.2f}", r["Interpretation"]])
+    t = Table(data, repeatRows=1, colWidths=[42,58,50,58,50,52,155])
+    t.setStyle(TableStyle([
+        ("BACKGROUND", (0,0), (-1,0), colors.HexColor("#475569")),
+        ("TEXTCOLOR", (0,0), (-1,0), colors.white),
+        ("GRID", (0,0), (-1,-1), 0.35, colors.grey),
+        ("FONTSIZE", (0,0), (-1,-1), 6.3),
+    ]))
+    story.append(t)
+    story.append(Spacer(1, 10))
+
+    story.append(Paragraph("4. Student/Subject Cluster Assignment", styles["Heading2"]))
+    data = [["Department", "Sem", "University ID", "Student", "Subject", "Overall", "Cluster"]]
+    for _, r in result["records"].sort_values(["Department", "Semester", "Student_Name", "Subject"]).iterrows():
+        data.append([str(r["Department"]), str(r["Semester"]), str(r["University_ID"]), str(r["Student_Name"]), str(r["Subject"]), f"{r['Overall']:.2f}%", str(int(r["Cluster"]))])
+    t = Table(data, repeatRows=1, colWidths=[105,30,65,85,105,45,42])
+    t.setStyle(TableStyle([
+        ("BACKGROUND", (0,0), (-1,0), colors.HexColor("#0f172a")),
+        ("TEXTCOLOR", (0,0), (-1,0), colors.white),
+        ("GRID", (0,0), (-1,-1), 0.25, colors.grey),
+        ("FONTSIZE", (0,0), (-1,-1), 5.7),
+        ("VALIGN", (0,0), (-1,-1), "MIDDLE"),
+    ]))
+    story.append(t)
+    story.append(Spacer(1, 8))
+    story.append(Paragraph(
+        "K-Means is used here as an analytical clustering method. Cluster labels are project-defined interpretations and do not represent official university grades.",
+        styles["Italic"]
+    ))
     doc.build(story)
     buffer.seek(0)
     return buffer.getvalue()
@@ -659,8 +819,8 @@ def create_all_department_pdf(records, summary, overall_average):
 
 def all_department_dashboard():
     app_brand()
-    st.title("🌐 All Department Analysis Dashboard")
-    st.caption("Combined academic overview of all departments and semesters stored in the application.")
+    st.title("🌐 All Department K-Means Analysis Dashboard")
+    st.caption("One combined K-Means clustering analysis using subject records from every department and semester.")
 
     c1, c2 = st.columns([1, 1])
     if c1.button("⬅️ Back to Tutor Dashboard", use_container_width=True):
@@ -670,39 +830,52 @@ def all_department_dashboard():
     if c2.button("🚪 Logout", use_container_width=True):
         logout()
 
-    records, summary, overall_average = build_all_department_analysis()
-    if records.empty:
-        st.info("No student records are available yet. Add student records from the Tutor Dashboard first.")
+    result = all_department_kmeans_analysis()
+    if not result.get("available"):
+        st.info(result.get("message", "No data available for analysis."))
         return
 
-    a, b, c = st.columns(3)
-    a.metric("Total Students", int(records["University_ID"].nunique()))
-    b.metric("Departments", int(records["Department"].nunique()))
-    c.metric("Overall Average", f"{overall_average:.2f}%")
+    a, b, c, d = st.columns(4)
+    a.metric("Students", result["n_students"])
+    b.metric("Departments", result["n_departments"])
+    c.metric("Subject Records", result["n_samples"])
+    d.metric("Clusters (K)", result["k"])
 
-    st.subheader("📊 Department-wise Analysis")
-    display_summary = summary.copy()
-    display_summary["Average_Overall"] = display_summary["Average_Overall"].map(lambda x: f"{x:.2f}%")
-    display_summary["Average_Attendance"] = display_summary["Average_Attendance"].map(lambda x: f"{x:.2f}%")
-    display_summary["Average_Internal"] = display_summary["Average_Internal"].map(lambda x: f"{x:.2f}/40")
-    st.dataframe(display_summary, use_container_width=True, hide_index=True)
+    st.subheader("📊 All Department K-Means Cluster Summary")
+    summary_df = pd.DataFrame(result["summary"]).rename(columns={
+        "Cluster": "Cluster", "Records": "Records", "Students": "Students",
+        "Departments": "Departments", "Average_Overall": "Average Overall", "Interpretation": "Interpretation"
+    })
+    summary_df["Average Overall"] = summary_df["Average Overall"].map(lambda x: f"{x:.2f}%")
+    st.dataframe(summary_df, use_container_width=True, hide_index=True)
 
-    st.subheader("👥 All Student Analysis")
-    display_records = records.copy()
-    display_records["Overall"] = display_records["Overall"].map(lambda x: f"{x:.2f}%")
-    display_records["Attendance"] = display_records["Attendance"].map(lambda x: f"{x:.2f}%")
-    display_records["Internal"] = display_records["Internal"].map(lambda x: f"{x:.2f}/40")
-    st.dataframe(display_records, use_container_width=True, hide_index=True)
+    st.subheader("🏫 Department-wise K-Means Clustering Table")
+    dept_df = result["department_cluster"].copy()
+    dept_df["Average_Overall"] = dept_df["Average_Overall"].map(lambda x: f"{x:.2f}%")
+    st.dataframe(dept_df, use_container_width=True, hide_index=True)
 
-    pdf = create_all_department_pdf(records, summary, overall_average)
+    st.subheader("🎯 K-Means Centroids")
+    st.dataframe(pd.DataFrame(result["centroids"]), use_container_width=True, hide_index=True)
+
+    st.subheader("👥 Student / Subject Cluster Assignment")
+    assignment_df = result["records"].copy()
+    st.dataframe(
+        assignment_df[["Department", "Semester", "University_ID", "Student_Name", "Subject", "Overall", "Cluster"]],
+        use_container_width=True,
+        hide_index=True,
+    )
+    st.caption(f"K-Means inertia: {result['inertia']:.4f}. Clustering uses standardized attendance, internal, assignment, previous-mark and study-hour features.")
+
+    pdf = create_all_department_kmeans_pdf(result)
     st.download_button(
-        "📥 Download All Department Analysis PDF",
+        "📥 Download Complete All-Department K-Means PDF",
         pdf,
-        "All_Department_Analysis.pdf",
+        "All_Department_KMeans_Clustering_Analysis.pdf",
         "application/pdf",
         use_container_width=True,
         type="primary",
     )
+
 
 # ============================================================
 # CSV TEMPLATE / IMPORT
