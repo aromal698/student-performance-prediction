@@ -186,25 +186,62 @@ def inject_css():
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
     html, body, [class*="css"] { font-family: Inter, sans-serif; }
-    .stApp { background: radial-gradient(circle at 15% 10%, rgba(56,189,248,.12), transparent 25%), radial-gradient(circle at 85% 80%, rgba(139,92,246,.13), transparent 28%), #070b17; color:#eef2ff; }
-    .block-container { max-width:1250px; padding-top:2rem; }
-    .hero,.login-wrap { position:relative; overflow:hidden; border:1px solid rgba(255,255,255,.12); border-radius:28px; background:linear-gradient(135deg,rgba(15,23,42,.96),rgba(30,41,59,.78)); box-shadow:0 25px 80px rgba(0,0,0,.35); }
+
+    /* FULL-PAGE DYNAMIC 3D BACKGROUND */
+    .stApp {
+        min-height:100vh;
+        color:#eef2ff;
+        background:#030712;
+        overflow-x:hidden;
+    }
+    .stApp::before {
+        content:""; position:fixed; inset:-20%; z-index:-5; pointer-events:none;
+        background:
+          radial-gradient(circle at 20% 25%, rgba(34,211,238,.22), transparent 22%),
+          radial-gradient(circle at 80% 30%, rgba(139,92,246,.24), transparent 24%),
+          radial-gradient(circle at 55% 85%, rgba(59,130,246,.18), transparent 25%),
+          linear-gradient(120deg,#020617,#0b1024 45%,#020617);
+        animation:bgshift 18s ease-in-out infinite alternate;
+        transform:translateZ(0);
+    }
+    .stApp::after {
+        content:""; position:fixed; inset:0; z-index:-4; pointer-events:none; opacity:.22;
+        background-image:
+          linear-gradient(rgba(125,211,252,.18) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(125,211,252,.18) 1px, transparent 1px);
+        background-size:55px 55px;
+        transform:perspective(650px) rotateX(58deg) scale(1.8);
+        transform-origin:center bottom;
+        animation:grid3d 9s linear infinite;
+    }
+    @keyframes bgshift {
+        0% { transform:scale(1) rotate(0deg); filter:hue-rotate(0deg); }
+        50% { transform:scale(1.08) rotate(1deg); filter:hue-rotate(18deg); }
+        100% { transform:scale(1.02) rotate(-1deg); filter:hue-rotate(-12deg); }
+    }
+    @keyframes grid3d {
+        from { background-position:0 0,0 0; }
+        to { background-position:0 110px,110px 0; }
+    }
+    .block-container { max-width:1250px; padding-top:2rem; position:relative; z-index:2; }
+    .hero,.login-wrap { position:relative; overflow:hidden; border:1px solid rgba(255,255,255,.14); border-radius:28px; background:linear-gradient(135deg,rgba(5,12,30,.78),rgba(15,23,42,.58)); box-shadow:0 25px 100px rgba(0,0,0,.45); backdrop-filter:blur(14px); }
     .hero { padding:45px 40px; }
     .hero h1 { font-size:clamp(2rem,5vw,4rem); margin:0; font-weight:800; letter-spacing:-2px; }
     .hero p { color:#b7c2d9; font-size:1.05rem; max-width:760px; }
     .login-wrap { min-height:430px; display:flex; align-items:center; justify-content:center; }
     .grid3d { position:absolute; inset:0; opacity:.18; background-image:linear-gradient(rgba(255,255,255,.12) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.12) 1px,transparent 1px); background-size:42px 42px; transform:perspective(500px) rotateX(62deg) scale(1.7); transform-origin:center bottom; animation:gridmove 8s linear infinite; }
     @keyframes gridmove { from{background-position:0 0,0 0} to{background-position:0 84px,84px 0} }
-    .orb { position:absolute; width:180px;height:180px;border-radius:50%;opacity:.45;background:radial-gradient(circle at 30% 30%,#67e8f9,#2563eb 55%,transparent 70%);animation:float 7s ease-in-out infinite; }
+    .orb { position:absolute; width:180px;height:180px;border-radius:50%;opacity:.45;background:radial-gradient(circle at 30% 30%,#67e8f9,#2563eb 55%,transparent 70%);animation:float 7s ease-in-out infinite; filter:blur(.2px); }
     .orb.o1 { right:5%;top:-45px; } .orb.o2 { left:45%;bottom:-110px;width:230px;height:230px;background:radial-gradient(circle at 30% 30%,#c084fc,#7c3aed 55%,transparent 70%);animation-delay:1.5s; }
-    @keyframes float { 0%,100%{transform:translate3d(0,0,0)} 50%{transform:translate3d(18px,25px,0)} }
-    .glass { background:rgba(15,23,42,.72);border:1px solid rgba(255,255,255,.14);border-radius:22px;padding:24px;backdrop-filter:blur(18px); }
+    @keyframes float { 0%,100%{transform:translate3d(0,0,0) rotate(0deg)} 50%{transform:translate3d(22px,28px,35px) rotate(8deg)} }
+    .glass { background:rgba(15,23,42,.68);border:1px solid rgba(255,255,255,.14);border-radius:22px;padding:24px;backdrop-filter:blur(18px); }
     .metric-card { padding:20px;border-radius:20px;border:1px solid rgba(255,255,255,.10);background:linear-gradient(135deg,rgba(30,41,59,.75),rgba(15,23,42,.7)); }
     .metric-card .value{font-size:2rem;font-weight:800}.metric-card .label{color:#94a3b8}
     .good-pop,.sad-pop { padding:25px;border-radius:24px;text-align:center;animation:pop .55s ease-out; }
     .good-pop { background:linear-gradient(135deg,rgba(34,197,94,.20),rgba(16,185,129,.08));border:1px solid rgba(74,222,128,.45); }
     .sad-pop { background:linear-gradient(135deg,rgba(239,68,68,.18),rgba(127,29,29,.08));border:1px solid rgba(248,113,113,.42); }
     @keyframes pop { from{transform:scale(.82);opacity:0} to{transform:scale(1);opacity:1} }
+    @media (prefers-reduced-motion: reduce) { .stApp::before,.stApp::after,.grid3d,.orb { animation:none !important; } }
     </style>
     """, unsafe_allow_html=True)
 
@@ -634,48 +671,97 @@ def student_login():
 # K-MEANS TUTOR ANALYSIS
 # ============================================================
 def kmeans_analysis(department):
+    """Robust K-Means tutor analysis. Handles 0, 1 and many records safely."""
     if not SKLEARN_AVAILABLE:
-        return {"available": False, "message": "scikit-learn is not installed. Install it with: pip install scikit-learn"}
+        return {"available": False, "message": "scikit-learn is not installed. Run: pip install scikit-learn"}
+
     df = load_reports()
     if df.empty:
-        return {"available": False, "message": "No student records are available for clustering."}
+        return {"available": False, "message": "No student records are available for K-Means analysis."}
+
     df = df[df["Department"].astype(str).eq(str(department))].copy()
+    if df.empty:
+        return {"available": False, "message": f"No records found for {department}. Add at least one student first."}
+
     records = []
     for _, row in df.iterrows():
-        for x in parse_subjects(row["Subjects_JSON"]):
-            records.append({
-                "University_ID": row["University_ID"], "Student_Name": row["Student_Name"],
-                "Subject": x["Subject"], "Attendance_Mark": x.get("Attendance_Mark", attendance_mark(x.get("Attendance", 0))),
-                "Internal": float(x.get("Internal", 0)), "Assignment": float(x.get("Assignment", 0)),
-                "Previous": float(x.get("Previous", 0)), "Study_Hours": float(x.get("Study_Hours", 0)),
-                "Overall": float(x.get("Overall", 0)),
-            })
-    if len(records) < 2:
-        return {"available": False, "message": "At least 2 subject records are required for K-Means analysis."}
+        for item in parse_subjects(row.get("Subjects_JSON", "[]")):
+            try:
+                records.append({
+                    "University_ID": str(row.get("University_ID", "")),
+                    "Student_Name": str(row.get("Student_Name", "")),
+                    "Subject": str(item.get("Subject", "Unknown")),
+                    "Attendance_Mark": float(item.get("Attendance_Mark", attendance_mark(item.get("Attendance", 0)))),
+                    "Internal": float(item.get("Internal", 0)),
+                    "Assignment": float(item.get("Assignment", 0)),
+                    "Previous": float(item.get("Previous", 0)),
+                    "Study_Hours": float(item.get("Study_Hours", 0)),
+                    "Overall": float(item.get("Overall", 0)),
+                })
+            except (TypeError, ValueError):
+                continue
+
+    if not records:
+        return {"available": False, "message": "Student records were found, but no valid subject data could be read."}
+
     raw = pd.DataFrame(records)
     features = ["Attendance_Mark", "Internal", "Assignment", "Previous", "Study_Hours"]
-    X = raw[features].astype(float).values
-    scaler = StandardScaler()
-    Xs = scaler.fit_transform(X)
-    k = min(4, len(raw))
-    model = KMeans(n_clusters=k, random_state=42, n_init=10)
-    raw["Cluster"] = model.fit_predict(Xs)
-    means = raw.groupby("Cluster")["Overall"].mean().sort_values()
-    order = {cluster: rank for rank, cluster in enumerate(means.index)}
-    labels = {0: "Low-performance group", 1: "Average-performance group", 2: "Above-average group", 3: "Good-performance group"}
-    raw["Cluster_Order"] = raw["Cluster"].map(order)
-    summary=[]
-    for cluster, g in raw.groupby("Cluster"):
-        rank=order[cluster]
-        summary.append({"cluster": int(cluster)+1, "records": int(len(g)), "avg_score": float(g["Overall"].mean()), "interpretation": labels.get(rank, "Performance group")})
-    centroids=[]
-    # Convert standardized centroids back to original units for readable calculations.
-    original_centroids = scaler.inverse_transform(model.cluster_centers_)
-    for cluster in range(k):
-        rank=order[cluster]
-        centroids.append({"cluster": f"{cluster+1} ({labels.get(rank, 'Group')})", "attendance_mark": float(original_centroids[cluster,0]), "internal": float(original_centroids[cluster,1]), "assignment": float(original_centroids[cluster,2]), "previous": float(original_centroids[cluster,3]), "study_hours": float(original_centroids[cluster,4])})
-    return {"available": True, "n_samples": len(raw), "k": k, "summary": summary, "centroids": centroids, "records": raw}
+    raw[features] = raw[features].apply(pd.to_numeric, errors="coerce").fillna(0.0)
+    raw["Overall"] = pd.to_numeric(raw["Overall"], errors="coerce").fillna(0.0)
 
+    # K cannot be larger than the number of available subject records.
+    k = min(4, len(raw))
+    X = raw[features].to_numpy(dtype=float)
+    scaler = StandardScaler()
+    X_scaled = scaler.fit_transform(X)
+
+    try:
+        model = KMeans(n_clusters=k, random_state=42, n_init=10)
+        raw["Cluster"] = model.fit_predict(X_scaled)
+    except Exception as exc:
+        return {"available": False, "message": f"K-Means could not be calculated: {exc}"}
+
+    # Sort clusters by average performance only for human-readable interpretation.
+    means = raw.groupby("Cluster")["Overall"].mean().sort_values()
+    order = {int(cluster): rank for rank, cluster in enumerate(means.index)}
+    labels = {0: "Low-performance group", 1: "Average-performance group", 2: "Above-average group", 3: "Good-performance group"}
+
+    summary = []
+    for cluster in sorted(raw["Cluster"].unique()):
+        group = raw[raw["Cluster"] == cluster]
+        rank = order[int(cluster)]
+        summary.append({
+            "cluster": int(cluster) + 1,
+            "records": int(len(group)),
+            "avg_score": float(group["Overall"].mean()),
+            "interpretation": labels.get(rank, "Performance group"),
+        })
+
+    original_centroids = scaler.inverse_transform(model.cluster_centers_)
+    centroids = []
+    for cluster in range(k):
+        rank = order.get(cluster, 0)
+        centroids.append({
+            "cluster": f"{cluster + 1} ({labels.get(rank, 'Performance group')})",
+            "attendance_mark": float(original_centroids[cluster, 0]),
+            "internal": float(original_centroids[cluster, 1]),
+            "assignment": float(original_centroids[cluster, 2]),
+            "previous": float(original_centroids[cluster, 3]),
+            "study_hours": float(original_centroids[cluster, 4]),
+        })
+
+    raw["Cluster"] = raw["Cluster"].astype(int) + 1
+    display_columns = ["University_ID", "Student_Name", "Subject", "Attendance_Mark", "Internal", "Assignment", "Previous", "Study_Hours", "Overall", "Cluster"]
+    return {
+        "available": True,
+        "n_samples": len(raw),
+        "k": k,
+        "summary": summary,
+        "centroids": centroids,
+        "records": raw[display_columns].copy(),
+        "features": features,
+        "inertia": float(model.inertia_),
+    }
 
 # ============================================================
 # TUTOR WORKFLOW
@@ -793,9 +879,9 @@ def teacher_dashboard():
             st.markdown("### Cluster centroids / calculations")
             st.dataframe(pd.DataFrame(result["centroids"]), use_container_width=True, hide_index=True)
             st.markdown("### Subject records with cluster")
-            display = result["records"][["University_ID", "Student_Name", "Subject", "Attendance_Mark", "Internal", "Assignment", "Previous", "Study_Hours", "Overall", "Cluster"]].copy()
-            display["Cluster"] = display["Cluster"].apply(lambda x: int(x)+1)
+            display = result["records"].copy()
             st.dataframe(display, use_container_width=True, hide_index=True)
+            st.caption(f"K-Means inertia: {result['inertia']:.4f} • Features: {', '.join(result['features'])}")
             st.download_button("📊 Download K-Means Analysis PDF", create_kmeans_pdf(result), f"{department.replace(' ', '_')}_KMeans_Analysis.pdf", "application/pdf", use_container_width=True, type="primary")
 
 # ============================================================
