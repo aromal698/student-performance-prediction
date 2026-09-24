@@ -335,7 +335,22 @@ def delete_student(uid, department):
 
 
 def get_subjects(department, semester):
-    return SUBJECTS_BY_DEPARTMENT.get(department, {}).get(semester, DEFAULT_SUBJECTS[semester])[:6]
+    """Return subjects ONLY for the selected department + semester.
+    No cross-department/default fallback is allowed.
+    """
+    department = str(department).strip()
+    semester = str(semester).strip().upper()
+    branch = SUBJECTS_BY_DEPARTMENT.get(department, {})
+    subjects = branch.get(semester, [])
+    if not subjects:
+        return []
+    return list(dict.fromkeys(subjects))[:6]
+
+def subject_selection_status(department, semester):
+    subjects = get_subjects(department, semester)
+    if not subjects:
+        return f"No subject mapping found for {department} — {semester}."
+    return f"{len(subjects)} subjects loaded for {department} — {semester}."
 
 
 def parse_subjects(raw):
@@ -812,32 +827,64 @@ def kmeans_analysis(department):
 # ============================================================
 def manual_add_form():
     st.subheader("➕ Add One Student")
-    tutor_department = st.session_state.get("active_department", st.session_state.teacher_department)
-    st.info(f"Active department: **{tutor_department}**")
+    st.caption("Select the B.Tech Department and Semester first. The subject list updates automatically for that exact combination.")
 
-    with st.form("add_student"):
+    # These controls are deliberately OUTSIDE st.form so Streamlit reruns
+    # immediately when Semester or Department changes.
+    sel1, sel2 = st.columns(2)
+    default_department = st.session_state.get("active_department", st.session_state.get("teacher_department"))
+    if default_department not in DEPARTMENTS:
+        default_department = DEPARTMENTS[0]
+
+    department = sel1.selectbox(
+        "B.Tech Department",
+        DEPARTMENTS,
+        index=DEPARTMENTS.index(default_department),
+        key="manual_department_selector",
+        help="Choose the student's B.Tech department."
+    )
+    semester = sel2.selectbox(
+        "B.Tech Semester",
+        SEMESTERS,
+        index=2,
+        key="manual_semester_selector",
+        help="Choose the student's semester."
+    )
+
+    # Keep dashboard context synchronized with the current selection.
+    st.session_state.active_department = department
+
+    subjects = get_subjects(department, semester)
+    if not subjects:
+        st.error(
+            f"No subject mapping is configured for {department} — {semester}. "
+            "Add the official KTU subjects to SUBJECTS_BY_DEPARTMENT in this file."
+        )
+        return
+
+    st.success(f"📚 {len(subjects)} subjects loaded: {department} — {semester}")
+    st.dataframe(
+        pd.DataFrame({"No.": range(1, len(subjects) + 1), "Subject": subjects}),
+        use_container_width=True,
+        hide_index=True,
+    )
+
+    with st.form(f"add_student_{re.sub(r'[^a-zA-Z0-9]', '_', department)}_{semester}"):
         c1, c2, c3 = st.columns(3)
         username = c1.text_input("Username")
         name = c2.text_input("Student Name")
         uid = c3.text_input("University ID")
-        dcol, scol = st.columns(2)
-        department = dcol.selectbox("Department", DEPARTMENTS, index=DEPARTMENTS.index(tutor_department) if tutor_department in DEPARTMENTS else 0)
-        semester = scol.selectbox("Semester", SEMESTERS, index=2)
 
-        subjects = get_subjects(department, semester)
-        st.success(f"Subjects automatically loaded for **{semester} – {department}**")
-        st.dataframe(pd.DataFrame({"No.": range(1, 7), "Subject": subjects}), use_container_width=True, hide_index=True)
-        st.caption("Changing Semester or Department automatically changes the six subjects used for this student.")
-
-        st.markdown("### Enter marks for the 6 subjects")
+        st.markdown("### Enter marks for the selected subjects")
         values = []
         for i, subject in enumerate(subjects):
-            st.markdown(f"**{i+1}. {subject}**")
+            st.markdown(f"**{i + 1}. {subject}**")
             a, b, c, d = st.columns(4)
-            att = a.number_input("Attendance %", 0.0, 100.0, 75.0, 1.0, key=f"att_{i}")
-            internal = b.number_input("Internal /40", 0.0, 40.0, 20.0, 1.0, key=f"int_{i}")
-            assignment = c.number_input("Assignment /15", 0.0, 15.0, 8.0, 1.0, key=f"asg_{i}")
-            previous = d.number_input("Previous /60", 0.0, 60.0, 30.0, 1.0, key=f"prev_{i}")
+            prefix = f"{re.sub(r'[^a-zA-Z0-9]', '_', department)}_{semester}_{i}"
+            att = a.number_input("Attendance %", 0.0, 100.0, 75.0, 1.0, key=f"att_{prefix}")
+            internal = b.number_input("Internal /40", 0.0, 40.0, 20.0, 1.0, key=f"int_{prefix}")
+            assignment = c.number_input("Assignment /15", 0.0, 15.0, 8.0, 1.0, key=f"asg_{prefix}")
+            previous = d.number_input("Previous /60", 0.0, 60.0, 30.0, 1.0, key=f"prev_{prefix}")
             values.append(normalize_subject({
                 "Subject": subject,
                 "Attendance": att,
@@ -847,16 +894,25 @@ def manual_add_form():
                 "Previous": previous,
             }))
 
-        submitted = st.form_submit_button("💾 Submit Student", use_container_width=True, type="primary")
+        submitted = st.form_submit_button(
+            "💾 Submit Student",
+            use_container_width=True,
+            type="primary"
+        )
 
     if submitted:
         if not username.strip() or not name.strip() or not uid.strip():
-            st.error("Username, Student Name and University ID are required.")
+            st.error("Enter Username, Student Name and University ID.")
+            return
+        if len(subjects) != 6:
+            st.error("This project requires exactly 6 subjects for the selected Semester + Department.")
             return
         report = make_report(username, name, uid, semester, department, values)
         upsert_report(report)
-        st.success("✅ Student submitted successfully. You can now enter the next student.")
-
+        st.success(f"✅ {name} saved under {department} — {semester}.")
+        st.session_state["last_added_uid"] = uid.strip()
+        st.session_state["last_added_department"] = department
+        st.rerun()
 
 def teacher_dashboard():
     app_brand()
