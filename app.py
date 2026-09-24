@@ -236,6 +236,29 @@ def inject_css():
     @keyframes float { 0%,100%{transform:translate3d(0,0,0) rotate(0deg)} 50%{transform:translate3d(22px,28px,35px) rotate(8deg)} }
     .glass { background:rgba(15,23,42,.68);border:1px solid rgba(255,255,255,.14);border-radius:22px;padding:24px;backdrop-filter:blur(18px); }
     .metric-card { padding:20px;border-radius:20px;border:1px solid rgba(255,255,255,.10);background:linear-gradient(135deg,rgba(30,41,59,.75),rgba(15,23,42,.7)); }
+
+    /* DYNAMIC 3D OBJECT FIELD */
+    .stApp .three-d-field { position:fixed; inset:0; z-index:-3; pointer-events:none; overflow:hidden; perspective:900px; }
+    .three-d-object { position:absolute; transform-style:preserve-3d; opacity:.55; filter:drop-shadow(0 0 18px rgba(96,165,250,.28)); }
+    .cube { width:90px;height:90px; left:8%;top:20%; animation:cubeFloat 12s ease-in-out infinite; }
+    .cube::before,.cube::after { content:""; position:absolute; inset:0; border:2px solid rgba(125,211,252,.45); background:rgba(59,130,246,.035); }
+    .cube::before { transform:rotateY(60deg); } .cube::after { transform:rotateX(60deg); }
+    .ring3d { width:150px;height:150px; right:7%;top:18%; border:3px solid rgba(196,181,253,.45); border-radius:50%; animation:ringFloat 10s linear infinite; box-shadow:0 0 30px rgba(139,92,246,.22); }
+    .ring3d::after { content:""; position:absolute; inset:18px; border:1px dashed rgba(125,211,252,.35); border-radius:50%; transform:rotateX(65deg); }
+    .sphere3d { width:115px;height:115px; left:45%;bottom:8%; border-radius:50%; background:radial-gradient(circle at 30% 25%,rgba(255,255,255,.65),rgba(59,130,246,.35) 16%,rgba(30,64,175,.12) 58%,transparent 70%); animation:sphereFloat 9s ease-in-out infinite; box-shadow:0 0 45px rgba(59,130,246,.18); }
+    .diamond3d { width:70px;height:70px; right:28%;bottom:24%; border:2px solid rgba(74,222,128,.32); transform:rotate(45deg); animation:diamondFloat 11s ease-in-out infinite; }
+    @keyframes cubeFloat { 0%,100%{transform:translate3d(0,0,0) rotateX(0) rotateY(0)} 50%{transform:translate3d(80px,-50px,120px) rotateX(180deg) rotateY(220deg)} }
+    @keyframes ringFloat { 0%{transform:rotateX(65deg) rotateY(0) translate3d(0,0,0)} 50%{transform:rotateX(110deg) rotateY(180deg) translate3d(-40px,55px,100px)} 100%{transform:rotateX(65deg) rotateY(360deg) translate3d(0,0,0)} }
+    @keyframes sphereFloat { 0%,100%{transform:translate3d(0,0,0) scale(1)} 50%{transform:translate3d(-70px,-80px,140px) scale(1.15)} }
+    @keyframes diamondFloat { 0%,100%{transform:translate3d(0,0,0) rotate(45deg) rotateX(0)} 50%{transform:translate3d(60px,-70px,90px) rotate(225deg) rotateX(180deg)} }
+
+    .brand-bar { display:flex; align-items:center; gap:14px; margin:0 0 22px; padding:10px 14px; width:max-content; border:1px solid rgba(125,211,252,.20); border-radius:18px; background:rgba(2,6,23,.48); backdrop-filter:blur(12px); box-shadow:0 10px 35px rgba(0,0,0,.22); }
+    .brand-mark { width:58px;height:58px; flex:0 0 58px; border-radius:17px; display:grid; place-items:center; background:linear-gradient(135deg,#22d3ee,#6366f1 55%,#a855f7); box-shadow:0 0 28px rgba(99,102,241,.42); }
+    .brand-name { font-weight:900; letter-spacing:.4px; font-size:1.05rem; color:#f8fafc; }
+    .brand-tag { color:#94a3b8; font-size:.72rem; margin-top:2px; }
+    .subject-card { border:1px solid rgba(255,255,255,.10); border-radius:18px; padding:15px; background:rgba(15,23,42,.58); margin:8px 0; }
+    .status-dot { display:inline-block; width:11px; height:11px; border-radius:50%; margin-right:7px; box-shadow:0 0 10px currentColor; }
+
     .metric-card .value{font-size:2rem;font-weight:800}.metric-card .label{color:#94a3b8}
     .good-pop,.sad-pop { padding:25px;border-radius:24px;text-align:center;animation:pop .55s ease-out; }
     .good-pop { background:linear-gradient(135deg,rgba(34,197,94,.20),rgba(16,185,129,.08));border:1px solid rgba(74,222,128,.45); }
@@ -243,6 +266,24 @@ def inject_css():
     @keyframes pop { from{transform:scale(.82);opacity:0} to{transform:scale(1);opacity:1} }
     @media (prefers-reduced-motion: reduce) { .stApp::before,.stApp::after,.grid3d,.orb { animation:none !important; } }
     </style>
+    """, unsafe_allow_html=True)
+
+def app_brand():
+    st.markdown("""
+    <div class="brand-bar">
+      <div class="brand-mark">
+        <svg width="42" height="42" viewBox="0 0 64 64" aria-label="EduPredict SPP logo">
+          <path d="M8 24 32 10l24 14-24 14L8 24Z" fill="none" stroke="white" stroke-width="3"/>
+          <path d="M16 29v14c8 8 24 8 32 0V29M32 38v14" fill="none" stroke="white" stroke-width="3" stroke-linecap="round"/>
+          <circle cx="48" cy="18" r="5" fill="white" opacity=".9"/>
+        </svg>
+      </div>
+      <div><div class="brand-name">EduPredict SPP</div><div class="brand-tag">Student Performance Prediction • KTU B.Tech</div></div>
+    </div>
+    <div class="three-d-field" aria-hidden="true">
+      <div class="three-d-object cube"></div><div class="three-d-object ring3d"></div>
+      <div class="three-d-object sphere3d"></div><div class="three-d-object diamond3d"></div>
+    </div>
     """, unsafe_allow_html=True)
 
 inject_css()
@@ -584,6 +625,7 @@ def logout():
 
 
 def home_page():
+    app_brand()
     st.markdown("""
     <div class="hero">
       <div class="grid3d"></div><div class="orb o1"></div><div class="orb o2"></div>
@@ -603,6 +645,7 @@ def home_page():
 
 
 def login_shell(title, subtitle):
+    app_brand()
     st.markdown(f"""
     <div class="login-wrap"><div class="grid3d"></div><div class="orb o1"></div><div class="orb o2"></div>
       <div style="width:min(560px,90%);position:relative;z-index:2;text-align:center">
@@ -629,6 +672,7 @@ def teacher_login():
             st.session_state.role = "teacher"
             st.session_state.username = username.strip()
             st.session_state.teacher_department = account["department"]
+            st.session_state.active_department = account["department"]
             st.session_state.page = "teacher_dashboard"
             st.rerun()
         else:
@@ -768,19 +812,22 @@ def kmeans_analysis(department):
 # ============================================================
 def manual_add_form():
     st.subheader("➕ Add One Student")
-    department = st.session_state.teacher_department
-    st.info(f"Tutor department: **{department}**")
+    tutor_department = st.session_state.get("active_department", st.session_state.teacher_department)
+    st.info(f"Active department: **{tutor_department}**")
 
     with st.form("add_student"):
         c1, c2, c3 = st.columns(3)
         username = c1.text_input("Username")
         name = c2.text_input("Student Name")
         uid = c3.text_input("University ID")
-        semester = st.selectbox("Semester", SEMESTERS, index=2)
+        dcol, scol = st.columns(2)
+        department = dcol.selectbox("Department", DEPARTMENTS, index=DEPARTMENTS.index(tutor_department) if tutor_department in DEPARTMENTS else 0)
+        semester = scol.selectbox("Semester", SEMESTERS, index=2)
 
         subjects = get_subjects(department, semester)
         st.success(f"Subjects automatically loaded for **{semester} – {department}**")
         st.dataframe(pd.DataFrame({"No.": range(1, 7), "Subject": subjects}), use_container_width=True, hide_index=True)
+        st.caption("Changing Semester or Department automatically changes the six subjects used for this student.")
 
         st.markdown("### Enter marks for the 6 subjects")
         values = []
@@ -812,11 +859,18 @@ def manual_add_form():
 
 
 def teacher_dashboard():
-    department = st.session_state.teacher_department
+    app_brand()
+    assigned_department = st.session_state.teacher_department
+    department = st.selectbox(
+        "Active Department",
+        DEPARTMENTS,
+        index=DEPARTMENTS.index(st.session_state.get("active_department", assigned_department)) if st.session_state.get("active_department", assigned_department) in DEPARTMENTS else 0,
+        key="active_department"
+    )
     c1, c2 = st.columns([5, 1])
     c1.title("👨‍🏫 Tutor Dashboard")
     c2.button("🚪 Logout", on_click=logout, use_container_width=True)
-    st.info(f"Assigned department: **{department}**")
+    st.info(f"Tutor account: **{assigned_department}**  •  Active department: **{department}**")
 
     tab1, tab2, tab3, tab4 = st.tabs(["➕ Add Student", "📤 Upload CSV", "👥 Student Records", "📈 K-Means Analysis"])
 
@@ -888,6 +942,7 @@ def teacher_dashboard():
 # STUDENT WORKFLOW
 # ============================================================
 def student_dashboard():
+    app_brand()
     student = st.session_state.student_report
     if not student:
         logout(); return
@@ -929,9 +984,11 @@ def student_dashboard():
     if any(float(x.get("Study_Hours", 0)) > 0 for x in subjects):
         if overall >= 80:
             st.balloons()
-            st.markdown(f'<div class="good-pop"><div style="font-size:4rem">🎉🏆</div><h2>Excellent Performance!</h2><p>Overall score: <b>{overall:.2f}%</b></p></div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="good-pop"><div style="font-size:4rem">🎉🏆</div><h2>Excellent Performance!</h2><p>Your marks are looking good. Keep the same consistency!</p><p>Overall score: <b>{overall:.2f}%</b></p></div>', unsafe_allow_html=True)
         elif overall < 50:
-            st.markdown(f'<div class="sad-pop"><div style="font-size:4rem">😔📉</div><h2>Needs Improvement</h2><p>Overall score: <b>{overall:.2f}%</b></p></div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="sad-pop"><div style="font-size:4rem">😔📉</div><h2>Needs Improvement</h2><p>Don’t give up. Follow the subject-wise improvement methods below.</p><p>Overall score: <b>{overall:.2f}%</b></p></div>', unsafe_allow_html=True)
+        else:
+            st.info(f"📘 Your marks are available. Overall score: **{overall:.2f}%**. Check each subject below for its individual indicator.")
 
         a, b, c = st.columns(3)
         a.markdown(f'<div class="metric-card"><div class="label">Overall Score</div><div class="value">{overall:.2f}%</div></div>', unsafe_allow_html=True)
@@ -942,7 +999,7 @@ def student_dashboard():
         rows = []
         for x in subjects:
             rows.append([x["Subject"], f"{x['Attendance']:.0f}%", f"{x.get('Attendance_Mark', attendance_mark(x['Attendance']))}/5", f"{x['Internal']:.0f}/40", f"{x['Assignment']:.0f}/15", f"{x['Previous']:.0f}/60", f"{x['Study_Hours']:.1f} h", f"{x['Overall']:.1f}%", f"{x.get('Circle', performance_circle(x['Level']))} {x['Level']}"])
-        st.subheader("📊 Subject-wise Result")
+        st.subheader("📊 Your Marks — Subject-wise Result")
         st.dataframe(pd.DataFrame(rows, columns=["Subject", "Attendance", "Att. Mark", "Internal", "Assignment", "Previous", "Study", "Score", "Performance"]), use_container_width=True, hide_index=True)
 
         st.subheader("🎯 Subject-wise Performance & Improvement")
