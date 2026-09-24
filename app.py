@@ -1,9 +1,9 @@
 import os
 import re
 import io
-
-import numpy as np
+import hashlib
 import pandas as pd
+import numpy as np
 import streamlit as st
 
 from sklearn.cluster import KMeans
@@ -13,20 +13,20 @@ from sklearn.metrics import accuracy_score, silhouette_score
 
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
-from reportlab.lib.enums import TA_CENTER
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.enums import TA_CENTER
 from reportlab.platypus import (
     SimpleDocTemplate,
     Paragraph,
     Spacer,
     Table,
     TableStyle,
+    PageBreak,
 )
 
-
-# ==========================================================
-# PAGE CONFIG
-# ==========================================================
+# ============================================================
+# PAGE CONFIGURATION
+# ============================================================
 
 st.set_page_config(
     page_title="Student Performance Prediction",
@@ -35,45 +35,12 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
-
-# ==========================================================
-# FILE SETTINGS
-# ==========================================================
+# ============================================================
+# CONSTANTS
+# ============================================================
 
 DATA_DIR = "data"
-DATA_FILE = os.path.join(
-    DATA_DIR,
-    "student_performance.csv"
-)
-
-os.makedirs(DATA_DIR, exist_ok=True)
-
-
-# ==========================================================
-# COLUMNS
-# ==========================================================
-
-COLUMNS = [
-    "Student_Name",
-    "Username",
-    "University_ID",
-    "Branch",
-    "Semester",
-    "Subject",
-    "Attendance",
-    "Internal_Mark",
-    "Assignment",
-    "Previous_Mark",
-    "Study_Hours",
-    "Performance",
-    "Performance_Percent",
-    "KMeans_Cluster",
-]
-
-
-# ==========================================================
-# DEPARTMENTS
-# ==========================================================
+DATA_FILE = os.path.join(DATA_DIR, "student_performance.csv")
 
 BRANCHES = [
     "Civil Engineering",
@@ -103,13 +70,55 @@ BRANCHES = [
     "Mechatronics Engineering",
 ]
 
+# ============================================================
+# TUTOR USERNAMES / PASSWORDS
+# ============================================================
 
-# ==========================================================
-# SEMESTERS
-# ==========================================================
+TUTOR_ACCOUNTS = {
+    "Civil Engineering": ("tutor_civil", "civil123"),
+    "Computer Science and Engineering": ("tutor_cse", "cse123"),
+    "Artificial Intelligence and Data Science": ("tutor_aids", "aids123"),
+    "Artificial Intelligence and Machine Learning": ("tutor_aiml", "aiml123"),
+    "Information Technology": ("tutor_it", "it123"),
+    "Electronics and Communication Engineering": ("tutor_ece", "ece123"),
+    "Electrical and Electronics Engineering": ("tutor_eee", "eee123"),
+    "Electrical Engineering": ("tutor_ee", "ee123"),
+    "Mechanical Engineering": ("tutor_me", "me123"),
+    "Chemical Engineering": ("tutor_chemical", "chemical123"),
+    "Biotechnology and Biochemical Engineering": ("tutor_bio", "bio123"),
+    "Food Technology": ("tutor_food", "food123"),
+    "Production Engineering": ("tutor_production", "production123"),
+    "Automobile Engineering": ("tutor_auto", "auto123"),
+    "Industrial Engineering": ("tutor_industrial", "industrial123"),
+    "Biomedical Engineering": ("tutor_biomedical", "biomedical123"),
+    "Aeronautical Engineering": ("tutor_aero", "aero123"),
+    "Applied Electronics and Instrumentation Engineering": (
+        "tutor_aei",
+        "aei123",
+    ),
+    "Electronics and Biomedical Engineering": ("tutor_ebm", "ebm123"),
+    "Electronics and Computer Engineering": ("tutor_ececomp", "ececomp123"),
+    "Computer Science and Engineering (Artificial Intelligence)": (
+        "tutor_cseai",
+        "cseai123",
+    ),
+    "Computer Science and Engineering (Data Science)": (
+        "tutor_csedata",
+        "csedata123",
+    ),
+    "Computer Science and Engineering (Cyber Security)": (
+        "tutor_cyber",
+        "cyber123",
+    ),
+    "Robotics and Automation": ("tutor_robotics", "robotics123"),
+    "Mechatronics Engineering": ("tutor_mechatronics", "mechatronics123"),
+}
+
+# ============================================================
+# SEMESTER SUBJECTS
+# ============================================================
 
 SEMESTERS = {
-
     "S1": [
         "Mathematics for Information Science-I",
         "Physics for Information Science",
@@ -118,7 +127,6 @@ SEMESTERS = {
         "Introduction to Computing",
         "Health and Wellness",
     ],
-
     "S2": [
         "Mathematics for Information Science-II",
         "Chemistry for Information Science",
@@ -127,25 +135,22 @@ SEMESTERS = {
         "Design Thinking and Product Development",
         "Professional Communication",
     ],
-
     "S3": [
         "Mathematics for Information Science-III",
         "Foundations of Artificial Intelligence",
         "Data Structures and Algorithms",
         "Introduction to Data Science",
         "Digital Electronics & Logic Design",
-        "Economics / Engineering Ethics",
+        "Engineering Economics / Ethics",
     ],
-
     "S4": [
         "Mathematics for Information Science-IV",
         "Database Management Systems",
         "Operating Systems",
         "Computer Organization and Architecture",
         "Object Oriented Programming",
-        "Constitution of India / Professional Ethics",
+        "Professional Ethics",
     ],
-
     "S5": [
         "Machine Learning",
         "Computer Networks",
@@ -154,7 +159,6 @@ SEMESTERS = {
         "Artificial Intelligence",
         "Program Elective-I",
     ],
-
     "S6": [
         "Deep Learning",
         "Big Data Analytics",
@@ -163,215 +167,44 @@ SEMESTERS = {
         "Natural Language Processing",
         "Program Elective-II",
     ],
-
     "S7": [
         "Major Project Phase-I",
         "Program Elective-III",
         "Program Elective-IV",
         "Open Elective",
         "Seminar",
+        "Mini Project",
     ],
-
     "S8": [
         "Major Project Phase-II",
         "Program Elective-V",
         "Program Elective-VI",
         "Comprehensive Viva",
         "Internship / Industrial Training",
+        "Project Viva",
     ],
 }
 
+# ============================================================
+# CUSTOM CSS
+# ============================================================
 
-# ==========================================================
-# TUTOR LOGIN ACCOUNTS
-# ==========================================================
-
-TUTOR_ACCOUNTS = {
-
-    "Civil Engineering": {
-        "username": "tutor_civil",
-        "password": "civil123",
-    },
-
-    "Computer Science and Engineering": {
-        "username": "tutor_cse",
-        "password": "cse123",
-    },
-
-    "Artificial Intelligence and Data Science": {
-        "username": "tutor_aids",
-        "password": "aids123",
-    },
-
-    "Artificial Intelligence and Machine Learning": {
-        "username": "tutor_aiml",
-        "password": "aiml123",
-    },
-
-    "Information Technology": {
-        "username": "tutor_it",
-        "password": "it123",
-    },
-
-    "Electronics and Communication Engineering": {
-        "username": "tutor_ece",
-        "password": "ece123",
-    },
-
-    "Electrical and Electronics Engineering": {
-        "username": "tutor_eee",
-        "password": "eee123",
-    },
-
-    "Electrical Engineering": {
-        "username": "tutor_ee",
-        "password": "ee123",
-    },
-
-    "Mechanical Engineering": {
-        "username": "tutor_me",
-        "password": "me123",
-    },
-
-    "Chemical Engineering": {
-        "username": "tutor_chemical",
-        "password": "chemical123",
-    },
-
-    "Biotechnology and Biochemical Engineering": {
-        "username": "tutor_bio",
-        "password": "bio123",
-    },
-
-    "Food Technology": {
-        "username": "tutor_food",
-        "password": "food123",
-    },
-
-    "Production Engineering": {
-        "username": "tutor_production",
-        "password": "production123",
-    },
-
-    "Automobile Engineering": {
-        "username": "tutor_auto",
-        "password": "auto123",
-    },
-
-    "Industrial Engineering": {
-        "username": "tutor_industrial",
-        "password": "industrial123",
-    },
-
-    "Biomedical Engineering": {
-        "username": "tutor_biomedical",
-        "password": "biomedical123",
-    },
-
-    "Aeronautical Engineering": {
-        "username": "tutor_aero",
-        "password": "aero123",
-    },
-
-    "Applied Electronics and Instrumentation Engineering": {
-        "username": "tutor_aei",
-        "password": "aei123",
-    },
-
-    "Electronics and Biomedical Engineering": {
-        "username": "tutor_ebm",
-        "password": "ebm123",
-    },
-
-    "Electronics and Computer Engineering": {
-        "username": "tutor_ececomp",
-        "password": "ececomp123",
-    },
-
-    "Computer Science and Engineering (Artificial Intelligence)": {
-        "username": "tutor_cseai",
-        "password": "cseai123",
-    },
-
-    "Computer Science and Engineering (Data Science)": {
-        "username": "tutor_csedata",
-        "password": "csedata123",
-    },
-
-    "Computer Science and Engineering (Cyber Security)": {
-        "username": "tutor_cyber",
-        "password": "cyber123",
-    },
-
-    "Robotics and Automation": {
-        "username": "tutor_robotics",
-        "password": "robotics123",
-    },
-
-    "Mechatronics Engineering": {
-        "username": "tutor_mechatronics",
-        "password": "mechatronics123",
-    },
-}
-
-
-# ==========================================================
-# SESSION STATE
-# ==========================================================
-
-if "page" not in st.session_state:
-    st.session_state.page = "home"
-
-if "student_logged_in" not in st.session_state:
-    st.session_state.student_logged_in = False
-
-if "tutor_logged_in" not in st.session_state:
-    st.session_state.tutor_logged_in = False
-
-if "student_username" not in st.session_state:
-    st.session_state.student_username = ""
-
-if "student_id" not in st.session_state:
-    st.session_state.student_id = ""
-
-if "student_name" not in st.session_state:
-    st.session_state.student_name = ""
-
-if "tutor_username" not in st.session_state:
-    st.session_state.tutor_username = ""
-
-if "tutor_branch" not in st.session_state:
-    st.session_state.tutor_branch = ""
-
-
-# ==========================================================
-# CSS
-# ==========================================================
-
-def load_css():
-
-    st.markdown(
-        """
+st.markdown(
+    """
 <style>
 
-/* ===============================
-   GLOBAL
-   =============================== */
-
-html, body, [data-testid="stAppViewContainer"] {
-    margin: 0;
-    padding: 0;
-}
+/* ---------------- GLOBAL ---------------- */
 
 .stApp {
-    background: #02040b;
+    background:
+        radial-gradient(circle at 15% 20%, rgba(0, 200, 255, 0.18), transparent 28%),
+        radial-gradient(circle at 85% 25%, rgba(160, 70, 255, 0.20), transparent 30%),
+        radial-gradient(circle at 50% 90%, rgba(0, 255, 170, 0.12), transparent 35%),
+        linear-gradient(135deg, #050816 0%, #0b1024 50%, #050713 100%);
     color: white;
 }
 
-header[data-testid="stHeader"] {
-    background: transparent;
-}
-
+/* Hide Streamlit default menu */
 #MainMenu {
     visibility: hidden;
 }
@@ -380,972 +213,597 @@ footer {
     visibility: hidden;
 }
 
+/* ---------------- CENTERED CONTENT ---------------- */
 
-/* ===============================
-   3D BACKGROUND
-   =============================== */
-
-.background-3d {
-    position: fixed;
-    inset: 0;
-    width: 100vw;
-    height: 100vh;
-    overflow: hidden;
-    z-index: -999;
-    background:
-        radial-gradient(
-            circle at 50% 40%,
-            rgba(0, 150, 255, 0.12),
-            transparent 38%
-        ),
-        radial-gradient(
-            circle at 15% 20%,
-            rgba(110, 60, 255, 0.12),
-            transparent 30%
-        ),
-        radial-gradient(
-            circle at 85% 70%,
-            rgba(0, 230, 190, 0.09),
-            transparent 30%
-        ),
-        #02040b;
+.block-container {
+    max-width: 1250px !important;
+    margin-left: auto !important;
+    margin-right: auto !important;
+    padding-top: 2rem !important;
+    padding-bottom: 3rem !important;
 }
 
+/* ---------------- FRONT PAGE ---------------- */
 
-/* ===============================
-   GRID
-   =============================== */
-
-.grid-3d {
-    position: absolute;
-    width: 200%;
-    height: 80%;
-    left: -50%;
-    bottom: -25%;
-
-    background-image:
-        linear-gradient(
-            rgba(0, 190, 255, 0.16) 1px,
-            transparent 1px
-        ),
-        linear-gradient(
-            90deg,
-            rgba(0, 190, 255, 0.16) 1px,
-            transparent 1px
-        );
-
-    background-size: 60px 60px;
-
-    transform:
-        perspective(450px)
-        rotateX(62deg);
-
-    animation:
-        gridAnimation 7s linear infinite;
-}
-
-@keyframes gridAnimation {
-
-    from {
-        transform:
-            perspective(450px)
-            rotateX(62deg)
-            translateY(0);
-    }
-
-    to {
-        transform:
-            perspective(450px)
-            rotateX(62deg)
-            translateY(60px);
-    }
-}
-
-
-/* ===============================
-   GLOWING SPHERES
-   =============================== */
-
-.sphere {
-    position: absolute;
-    border-radius: 50%;
-    filter: blur(1px);
-    opacity: 0.65;
-    animation: sphereFloat 9s ease-in-out infinite;
-}
-
-.sphere1 {
-    width: 180px;
-    height: 180px;
-    left: 3%;
-    top: 15%;
-
-    background:
-        radial-gradient(
-            circle at 35% 30%,
-            white 0%,
-            #00b7ff 8%,
-            transparent 68%
-        );
-}
-
-.sphere2 {
-    width: 210px;
-    height: 210px;
-    right: 4%;
-    top: 12%;
-
-    background:
-        radial-gradient(
-            circle at 35% 30%,
-            white 0%,
-            #7a43ff 8%,
-            transparent 68%
-        );
-
-    animation-delay: -3s;
-}
-
-.sphere3 {
-    width: 150px;
-    height: 150px;
-    left: 43%;
-    bottom: 7%;
-
-    background:
-        radial-gradient(
-            circle at 35% 30%,
-            white 0%,
-            #00d8b0 8%,
-            transparent 68%
-        );
-
-    animation-delay: -6s;
-}
-
-@keyframes sphereFloat {
-
-    0%, 100% {
-        transform:
-            translate3d(0,0,0)
-            scale(1);
-    }
-
-    50% {
-        transform:
-            translate3d(30px,-40px,40px)
-            scale(1.12);
-    }
-}
-
-
-/* ===============================
-   FLOATING ACADEMIC OBJECTS
-   =============================== */
-
-.float-card {
-    position: absolute;
-
-    width: 100px;
-    height: 75px;
-
-    display: flex;
-    justify-content: center;
-    align-items: center;
-
-    border-radius: 20px;
-
-    background:
-        linear-gradient(
-            145deg,
-            rgba(255,255,255,.13),
-            rgba(255,255,255,.035)
-        );
-
-    border:
-        1px solid rgba(255,255,255,.16);
-
-    backdrop-filter: blur(14px);
-
-    box-shadow:
-        0 20px 60px rgba(0,0,0,.45),
-        inset 0 1px 1px rgba(255,255,255,.18);
-
-    font-size: 38px;
-
-    animation:
-        cardFloat 8s ease-in-out infinite;
-}
-
-.float-card span {
-    transform: translateZ(35px);
-}
-
-.fc1 {
-    left: 8%;
-    top: 32%;
-}
-
-.fc2 {
-    right: 8%;
-    top: 35%;
-    animation-delay: -2s;
-}
-
-.fc3 {
-    left: 13%;
-    bottom: 12%;
-    animation-delay: -4s;
-}
-
-.fc4 {
-    right: 13%;
-    bottom: 13%;
-    animation-delay: -6s;
-}
-
-@keyframes cardFloat {
-
-    0%,100% {
-        transform:
-            translateY(0)
-            rotateY(15deg)
-            rotateX(4deg);
-    }
-
-    50% {
-        transform:
-            translateY(-25px)
-            rotateY(-15deg)
-            rotateX(-4deg);
-    }
-}
-
-
-/* ===============================
-   PARTICLES
-   =============================== */
-
-.particle {
-    position: absolute;
-
-    width: 4px;
-    height: 4px;
-
-    border-radius: 50%;
-
-    background: #62dcff;
-
-    box-shadow:
-        0 0 15px #62dcff;
-
-    animation:
-        particleAnimation 8s linear infinite;
-}
-
-.particle:nth-child(1) {
-    left: 12%;
-    top: 70%;
-}
-
-.particle:nth-child(2) {
-    left: 22%;
-    top: 25%;
-    animation-delay: 1s;
-}
-
-.particle:nth-child(3) {
-    left: 35%;
-    top: 70%;
-    animation-delay: 2s;
-}
-
-.particle:nth-child(4) {
-    left: 55%;
-    top: 20%;
-    animation-delay: 3s;
-}
-
-.particle:nth-child(5) {
-    left: 72%;
-    top: 65%;
-    animation-delay: 4s;
-}
-
-.particle:nth-child(6) {
-    left: 90%;
-    top: 45%;
-    animation-delay: 5s;
-}
-
-@keyframes particleAnimation {
-
-    0% {
-        transform:
-            translateY(0)
-            scale(.5);
-        opacity: .1;
-    }
-
-    50% {
-        transform:
-            translateY(-100px)
-            scale(1.5);
-        opacity: 1;
-    }
-
-    100% {
-        transform:
-            translateY(-200px)
-            scale(.2);
-        opacity: 0;
-    }
-}
-
-
-/* ===============================
-   CENTERING
-   =============================== */
-
-.login-wrapper {
-
-    min-height: 100vh;
-
+.front-wrapper {
+    min-height: 88vh;
     width: 100%;
-
     display: flex;
-
-    align-items: center;
-
     justify-content: center;
-
-    padding: 30px;
-
-    box-sizing: border-box;
+    align-items: center;
 }
 
-
-/* ===============================
-   LOGIN CARD
-   =============================== */
-
-.login-card {
-
-    width: min(900px, 94vw);
-
-    margin: auto;
-
-    padding: 42px;
-
+.front-card {
+    width: min(900px, 94%);
+    padding: 55px 50px;
     border-radius: 32px;
 
-    background:
-        linear-gradient(
-            145deg,
-            rgba(255,255,255,.12),
-            rgba(255,255,255,.035)
-        );
-
-    border:
-        1px solid rgba(255,255,255,.18);
-
-    backdrop-filter: blur(25px);
+    background: rgba(12, 18, 45, 0.72);
+    border: 1px solid rgba(255,255,255,0.14);
 
     box-shadow:
-        0 35px 100px rgba(0,0,0,.60),
-        inset 0 1px 1px rgba(255,255,255,.18);
+        0 30px 80px rgba(0,0,0,0.45),
+        0 0 60px rgba(0,190,255,0.08);
 
-    box-sizing: border-box;
+    backdrop-filter: blur(18px);
+
+    text-align: center;
 }
 
-
-/* ===============================
-   MAIN HEADING
-   =============================== */
+/* MAIN HEADING */
 
 .main-heading {
-
-    width: 100%;
-
     text-align: center;
-
-    font-size:
-        clamp(30px, 5vw, 58px);
-
-    font-weight: 950;
-
+    font-size: clamp(30px, 5vw, 58px);
+    font-weight: 900;
     letter-spacing: 2px;
 
-    line-height: 1.15;
-
-    margin:
-        0 0 35px 0;
-
-    background:
-        linear-gradient(
-            90deg,
-            #ffffff,
-            #50ddff,
-            #a56cff,
-            #ffffff
-        );
-
-    background-size: 300% auto;
+    background: linear-gradient(
+        90deg,
+        #ffffff,
+        #58d9ff,
+        #b77cff,
+        #ffffff
+    );
 
     -webkit-background-clip: text;
-
     -webkit-text-fill-color: transparent;
 
-    animation:
-        headingGlow 5s linear infinite;
-
-    filter:
-        drop-shadow(
-            0 0 20px
-            rgba(60,200,255,.25)
-        );
+    margin-bottom: 45px;
 }
 
-@keyframes headingGlow {
-
-    0% {
-        background-position: 0% center;
-    }
-
-    50% {
-        background-position: 100% center;
-    }
-
-    100% {
-        background-position: 0% center;
-    }
-}
-
-
-/* ===============================
-   ROLE CARDS
-   =============================== */
+/* LOGIN ROLE CARDS */
 
 .role-card {
+    padding: 28px 20px;
+    border-radius: 22px;
 
-    min-height: 210px;
+    background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(255,255,255,0.12);
 
-    display: flex;
-
-    flex-direction: column;
-
-    justify-content: center;
-
-    align-items: center;
-
-    text-align: center;
-
-    padding: 25px;
-
-    border-radius: 25px;
-
-    background:
-        rgba(255,255,255,.055);
-
-    border:
-        1px solid rgba(255,255,255,.14);
-
-    transition:
-        .35s ease;
-
-    box-shadow:
-        0 15px 50px rgba(0,0,0,.30);
+    transition: all 0.3s ease;
 }
 
 .role-card:hover {
-
-    transform:
-        translateY(-10px)
-        scale(1.02);
-
-    border-color:
-        rgba(80,220,255,.45);
-
-    box-shadow:
-        0 25px 70px
-        rgba(0,180,255,.18);
+    transform: translateY(-8px);
+    background: rgba(255,255,255,0.10);
+    box-shadow: 0 15px 40px rgba(0,200,255,0.12);
 }
 
 .role-icon {
-    font-size: 60px;
-    margin-bottom: 12px;
+    font-size: 55px;
+    margin-bottom: 10px;
 }
 
 .role-title {
-    font-size: 25px;
-    font-weight: 900;
+    font-size: 24px;
+    font-weight: 800;
 }
 
-.role-description {
-    color: #b8c7d9;
-    font-size: 14px;
-    margin-top: 8px;
-}
+/* ---------------- DASHBOARD HEADER ---------------- */
 
+.dashboard-header {
+    width: 100%;
+    max-width: 1150px;
+    margin: 0 auto 25px auto;
 
-/* ===============================
-   INPUTS
-   =============================== */
+    text-align: center;
 
-.stTextInput input,
-.stSelectbox div[data-baseweb="select"] {
+    padding: 30px 25px;
 
-    background:
-        rgba(255,255,255,.07) !important;
+    border-radius: 25px;
 
-    border:
-        1px solid rgba(255,255,255,.15) !important;
-
-    color: white !important;
-
-    border-radius: 12px !important;
-}
-
-
-/* ===============================
-   BUTTONS
-   =============================== */
-
-.stButton > button,
-.stDownloadButton > button {
-
-    border-radius: 12px !important;
-
-    min-height: 45px;
-
-    font-weight: 800 !important;
-
-    border:
-        1px solid rgba(255,255,255,.16) !important;
-
-    background:
-        linear-gradient(
-            135deg,
-            rgba(0,180,255,.20),
-            rgba(130,70,255,.20)
-        ) !important;
-
-    color: white !important;
-
-    transition:
-        .25s ease !important;
-}
-
-.stButton > button:hover,
-.stDownloadButton > button:hover {
-
-    transform:
-        translateY(-2px);
-
-    border-color:
-        rgba(80,220,255,.65) !important;
+    background: rgba(13, 20, 48, 0.75);
+    border: 1px solid rgba(255,255,255,0.12);
 
     box-shadow:
-        0 10px 30px
-        rgba(0,180,255,.20);
-}
+        0 20px 60px rgba(0,0,0,0.35),
+        0 0 40px rgba(70,150,255,0.07);
 
-
-/* ===============================
-   DASHBOARD
-   =============================== */
-
-.dashboard-container {
-    padding: 25px;
+    backdrop-filter: blur(15px);
 }
 
 .dashboard-title {
-
-    font-size: 36px;
-
+    font-size: clamp(28px, 4vw, 45px);
     font-weight: 900;
 
-    margin-bottom: 20px;
+    background: linear-gradient(
+        90deg,
+        #ffffff,
+        #5bd8ff,
+        #b878ff
+    );
+
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
 }
 
+.dashboard-subtitle {
+    color: #b8c6df;
+    font-size: 16px;
+    margin-top: 8px;
+}
 
-/* ===============================
-   MOBILE
-   =============================== */
+/* ---------------- SECTION CARDS ---------------- */
 
-@media(max-width:700px) {
+.section-card {
+    max-width: 1150px;
+    margin: 0 auto 25px auto;
 
-    .login-wrapper {
-        padding: 15px;
-    }
+    padding: 28px;
 
-    .login-card {
-        padding: 25px 18px;
-    }
+    border-radius: 24px;
 
-    .float-card {
-        display: none;
+    background: rgba(12,18,42,0.70);
+
+    border: 1px solid rgba(255,255,255,0.10);
+
+    box-shadow: 0 18px 45px rgba(0,0,0,0.25);
+
+    backdrop-filter: blur(14px);
+}
+
+/* ---------------- METRIC CARDS ---------------- */
+
+.metric-card {
+    text-align: center;
+
+    padding: 22px;
+
+    border-radius: 20px;
+
+    background: rgba(255,255,255,0.06);
+
+    border: 1px solid rgba(255,255,255,0.10);
+}
+
+.metric-number {
+    font-size: 32px;
+    font-weight: 900;
+}
+
+.metric-label {
+    color: #aab9d0;
+    font-size: 14px;
+}
+
+/* ---------------- PERFORMANCE CIRCLE ---------------- */
+
+.performance-circle {
+    width: 105px;
+    height: 105px;
+
+    border-radius: 50%;
+
+    margin: 15px auto;
+
+    display: flex;
+    align-items: center;
+    justify-content: center;
+
+    font-size: 35px;
+
+    border: 8px solid currentColor;
+}
+
+/* ---------------- SUBJECT CARD ---------------- */
+
+.subject-card {
+    padding: 22px;
+
+    border-radius: 20px;
+
+    background: rgba(255,255,255,0.045);
+
+    border: 1px solid rgba(255,255,255,0.09);
+
+    margin-bottom: 18px;
+}
+
+.subject-title {
+    font-size: 20px;
+    font-weight: 800;
+    margin-bottom: 15px;
+}
+
+/* ---------------- LOGIN BOX ---------------- */
+
+.login-box {
+    max-width: 620px;
+    margin: 25px auto;
+
+    padding: 35px;
+
+    border-radius: 25px;
+
+    background: rgba(10,16,40,0.82);
+
+    border: 1px solid rgba(255,255,255,0.12);
+
+    box-shadow: 0 20px 60px rgba(0,0,0,0.4);
+
+    backdrop-filter: blur(18px);
+}
+
+/* ---------------- BUTTONS ---------------- */
+
+.stButton > button {
+    width: 100%;
+
+    border-radius: 14px;
+
+    min-height: 45px;
+
+    font-weight: 700;
+
+    border: 1px solid rgba(255,255,255,0.15);
+
+    transition: all 0.2s ease;
+}
+
+.stButton > button:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 25px rgba(0,190,255,0.18);
+}
+
+/* ---------------- TABS ---------------- */
+
+.stTabs [data-baseweb="tab-list"] {
+    justify-content: center;
+    gap: 10px;
+}
+
+.stTabs [data-baseweb="tab"] {
+    padding: 12px 24px;
+    border-radius: 12px;
+}
+
+/* ---------------- DATAFRAME ---------------- */
+
+[data-testid="stDataFrame"] {
+    border-radius: 15px;
+    overflow: hidden;
+}
+
+/* ---------------- MOBILE ---------------- */
+
+@media (max-width: 700px) {
+
+    .front-card {
+        padding: 35px 20px;
     }
 
     .main-heading {
         font-size: 30px;
     }
+
+    .dashboard-header {
+        padding: 22px 15px;
+    }
+
+    .section-card {
+        padding: 18px;
+    }
 }
 
 </style>
-        """,
-        unsafe_allow_html=True,
-    )
+""",
+    unsafe_allow_html=True,
+)
+
+# ============================================================
+# SESSION STATE
+# ============================================================
+
+defaults = {
+    "page": "home",
+    "role": None,
+    "student_logged": False,
+    "tutor_logged": False,
+    "student_username": "",
+    "student_id": "",
+    "tutor_branch": "",
+    "tutor_username": "",
+}
+
+for key, value in defaults.items():
+    if key not in st.session_state:
+        st.session_state[key] = value
 
 
-# ==========================================================
-# BACKGROUND
-# ==========================================================
-
-def background():
-
-    st.markdown(
-        """
-<div class="background-3d">
-
-    <div class="grid-3d"></div>
-
-    <div class="sphere sphere1"></div>
-    <div class="sphere sphere2"></div>
-    <div class="sphere sphere3"></div>
-
-    <div class="particle"></div>
-    <div class="particle"></div>
-    <div class="particle"></div>
-    <div class="particle"></div>
-    <div class="particle"></div>
-    <div class="particle"></div>
-
-    <div class="float-card fc1">
-        <span>🎓</span>
-    </div>
-
-    <div class="float-card fc2">
-        <span>📊</span>
-    </div>
-
-    <div class="float-card fc3">
-        <span>🤖</span>
-    </div>
-
-    <div class="float-card fc4">
-        <span>💻</span>
-    </div>
-
-</div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-
-# ==========================================================
+# ============================================================
 # DATA FUNCTIONS
-# ==========================================================
+# ============================================================
 
-def load_data():
+def ensure_data_file():
+    os.makedirs(DATA_DIR, exist_ok=True)
 
     if not os.path.exists(DATA_FILE):
-        return pd.DataFrame(columns=COLUMNS)
+        columns = [
+            "Name",
+            "University_ID",
+            "Branch",
+            "Semester",
+            "Subject",
+            "Attendance",
+            "Study_Hours",
+            "Internal",
+            "Assignment",
+            "Previous_Mark",
+        ]
+
+        pd.DataFrame(columns=columns).to_csv(DATA_FILE, index=False)
+
+
+def load_data():
+    ensure_data_file()
 
     try:
         df = pd.read_csv(DATA_FILE)
     except Exception:
-        return pd.DataFrame(columns=COLUMNS)
+        df = pd.DataFrame()
 
-    for col in COLUMNS:
-
-        if col not in df.columns:
-            df[col] = np.nan
-
-    return df[COLUMNS]
+    return df
 
 
 def save_data(df):
-
-    df.to_csv(
-        DATA_FILE,
-        index=False
-    )
+    os.makedirs(DATA_DIR, exist_ok=True)
+    df.to_csv(DATA_FILE, index=False)
 
 
-# ==========================================================
-# ATTENDANCE
-# ==========================================================
+# ============================================================
+# PERFORMANCE FUNCTIONS
+# ============================================================
 
 def attendance_mark(attendance):
-
     if attendance >= 90:
         return 5
-
-    if attendance >= 80:
+    elif attendance >= 80:
         return 4
-
-    if attendance >= 70:
+    elif attendance >= 70:
         return 3
-
-    if attendance >= 60:
+    elif attendance >= 60:
         return 2
-
-    if attendance >= 10:
+    elif attendance >= 10:
         return 1
+    else:
+        return 0
 
-    return 0
 
+def calculate_performance(row):
+    attendance = float(row["Attendance"])
+    study = float(row["Study_Hours"])
+    internal = float(row["Internal"])
+    assignment = float(row["Assignment"])
+    previous = float(row["Previous_Mark"])
 
-# ==========================================================
-# PERFORMANCE
-# ==========================================================
+    att_mark = attendance_mark(attendance)
 
-def calculate_performance(
-    attendance,
-    internal,
-    assignment,
-    previous,
-    study,
-):
-
-    attendance_percent = (
-        attendance_mark(attendance) / 5
-    ) * 100
-
-    internal_percent = (
-        internal / 40
-    ) * 100
-
-    assignment_percent = (
-        assignment / 15
-    ) * 100
-
-    previous_percent = (
-        previous / 60
-    ) * 100
-
-    study_percent = min(
-        study / 6 * 100,
-        100
-    )
+    attendance_percent = (att_mark / 5) * 100
+    study_percent = min((study / 6) * 100, 100)
+    internal_percent = (internal / 40) * 100
+    assignment_percent = (assignment / 15) * 100
+    previous_percent = (previous / 60) * 100
 
     overall = np.mean([
         attendance_percent,
+        study_percent,
         internal_percent,
         assignment_percent,
         previous_percent,
-        study_percent,
     ])
 
     if overall < 50:
         level = "Low Performance"
-
+        emoji = "🔴"
+        color = "#ff4d4d"
     elif overall < 65:
         level = "Average Performance"
-
+        emoji = "🟠"
+        color = "#ff9f43"
     elif overall < 80:
         level = "Above Average Performance"
-
+        emoji = "🟡"
+        color = "#ffd93d"
     else:
         level = "Good Performance"
+        emoji = "🟢"
+        color = "#45e36b"
 
-    return round(overall, 2), level
+    return {
+        "Attendance Mark": att_mark,
+        "Overall Percentage": round(overall, 2),
+        "Performance": level,
+        "Emoji": emoji,
+        "Color": color,
+    }
 
 
-# ==========================================================
-# PASSWORD
-# ==========================================================
+def add_performance_columns(df):
+    if df.empty:
+        return df
 
-def valid_student_password(password):
+    result = df.copy()
 
-    return bool(
-        re.fullmatch(
-            r"BTECH(20\d{2})",
-            password
-        )
-        and
-        2000 <= int(password[-4:]) <= 2022
+    performance_values = result.apply(calculate_performance, axis=1)
+
+    result["Attendance_Mark"] = performance_values.apply(
+        lambda x: x["Attendance Mark"]
     )
 
+    result["Overall_Percentage"] = performance_values.apply(
+        lambda x: x["Overall Percentage"]
+    )
 
-# ==========================================================
-# GUIDANCE
-# ==========================================================
-
-def guidance(row):
-
-    result = []
-
-    if row["Attendance"] < 75:
-        result.append(
-            "Improve attendance and attend classes regularly."
-        )
-
-    if row["Internal_Mark"] < 20:
-        result.append(
-            "Increase preparation for internal examinations."
-        )
-
-    if row["Assignment"] < 8:
-        result.append(
-            "Complete assignments regularly."
-        )
-
-    if row["Previous_Mark"] < 30:
-        result.append(
-            "Revise previous topics and strengthen fundamentals."
-        )
-
-    if row["Study_Hours"] < 3:
-        result.append(
-            "Increase daily study and revision time."
-        )
-
-    if not result:
-        result.append(
-            "Excellent performance! Keep up the good work."
-        )
+    result["Performance"] = performance_values.apply(
+        lambda x: x["Performance"]
+    )
 
     return result
 
 
-# ==========================================================
+# ============================================================
 # K-MEANS
-# ==========================================================
+# ============================================================
+
+FEATURES = [
+    "Attendance",
+    "Study_Hours",
+    "Internal",
+    "Assignment",
+    "Previous_Mark",
+]
+
 
 def run_kmeans(df):
-
-    features = [
-        "Attendance",
-        "Internal_Mark",
-        "Assignment",
-        "Previous_Mark",
-        "Study_Hours",
-    ]
-
     if len(df) < 3:
-        return df.copy(), None
+        return df, None, None
 
-    work = df.copy()
+    clean = df.copy()
 
-    X = work[
-        features
-    ].fillna(0)
+    for col in FEATURES:
+        clean[col] = pd.to_numeric(clean[col], errors="coerce")
 
-    k = min(
-        3,
-        len(work)
-    )
+    clean = clean.dropna(subset=FEATURES)
+
+    if len(clean) < 3:
+        return df, None, None
+
+    X = clean[FEATURES].values
+
+    n_clusters = min(3, len(clean))
 
     model = KMeans(
-        n_clusters=k,
+        n_clusters=n_clusters,
         random_state=42,
-        n_init=10
+        n_init=10,
     )
 
-    work[
-        "KMeans_Cluster"
-    ] = model.fit_predict(X)
+    clusters = model.fit_predict(X)
+
+    clean["KMeans_Cluster"] = clusters
 
     score = None
 
-    if work[
-        "KMeans_Cluster"
-    ].nunique() > 1:
+    if len(set(clusters)) > 1:
+        score = silhouette_score(X, clusters)
 
-        score = silhouette_score(
-            X,
-            work["KMeans_Cluster"]
-        )
-
-    return work, score
+    return clean, model, score
 
 
-# ==========================================================
+# ============================================================
 # RANDOM FOREST
-# ==========================================================
+# ============================================================
 
-def train_random_forest(df):
-
+def create_rf_model(df):
     if len(df) < 10:
-        return None, None
+        return None, None, None
 
-    features = [
-        "Attendance",
-        "Internal_Mark",
-        "Assignment",
-        "Previous_Mark",
-        "Study_Hours",
-    ]
+    clean = df.copy()
 
-    X = df[
-        features
-    ].fillna(0)
+    for col in FEATURES:
+        clean[col] = pd.to_numeric(clean[col], errors="coerce")
 
-    y = df[
-        "Performance"
-    ].astype(str)
+    clean = clean.dropna(subset=FEATURES)
 
-    if y.nunique() < 2:
-        return None, None
+    if len(clean) < 10:
+        return None, None, None
+
+    clean = add_performance_columns(clean)
+
+    X = clean[FEATURES]
+
+    y = clean["Performance"]
+
+    if len(y.unique()) < 2:
+        return None, None, None
 
     try:
-
         X_train, X_test, y_train, y_test = train_test_split(
             X,
             y,
-            test_size=.2,
+            test_size=0.2,
             random_state=42,
             stratify=y,
         )
-
-    except ValueError:
-
+    except Exception:
         X_train, X_test, y_train, y_test = train_test_split(
             X,
             y,
-            test_size=.2,
+            test_size=0.2,
             random_state=42,
         )
 
     model = RandomForestClassifier(
         n_estimators=100,
-        random_state=42
+        random_state=42,
     )
 
-    model.fit(
-        X_train,
-        y_train
-    )
+    model.fit(X_train, y_train)
 
-    prediction = model.predict(
-        X_test
-    )
+    prediction = model.predict(X_test)
 
-    accuracy = accuracy_score(
-        y_test,
-        prediction
-    )
+    accuracy = accuracy_score(y_test, prediction)
 
-    return model, accuracy
+    return model, clean, accuracy
 
 
-# ==========================================================
-# PDF
-# ==========================================================
+# ============================================================
+# PASSWORD VALIDATION
+# ============================================================
 
-def make_pdf(
-    name,
-    university_id,
-    branch,
-    semester,
-    data,
-):
+def valid_student_password(password):
+
+    pattern = r"BTECH(20\d{2})"
+
+    match = re.fullmatch(pattern, password)
+
+    if not match:
+        return False
+
+    year = int(password[-4:])
+
+    return 2000 <= year <= 2022
+
+
+# ============================================================
+# PDF REPORT
+# ============================================================
+
+def create_student_pdf(student_df):
+
+    if student_df.empty:
+        return None
+
+    first = student_df.iloc[0]
+
+    name = str(first["Name"])
+    university_id = str(first["University_ID"])
+    branch = str(first["Branch"])
 
     buffer = io.BytesIO()
 
-    doc = SimpleDocTemplate(
+    document = SimpleDocTemplate(
         buffer,
         pagesize=A4,
         rightMargin=35,
@@ -1356,801 +814,821 @@ def make_pdf(
 
     styles = getSampleStyleSheet()
 
-    title = ParagraphStyle(
+    title_style = ParagraphStyle(
         "Title",
         parent=styles["Title"],
         alignment=TA_CENTER,
-        fontSize=18,
-        spaceAfter=15,
+        fontSize=20,
+        leading=24,
+        spaceAfter=12,
     )
 
-    heading = ParagraphStyle(
+    heading_style = ParagraphStyle(
         "Heading",
         parent=styles["Heading2"],
-        fontSize=13,
-        spaceBefore=10,
+        fontSize=14,
+        leading=18,
+        spaceBefore=12,
         spaceAfter=8,
-    )
-
-    normal = ParagraphStyle(
-        "Normal",
-        parent=styles["BodyText"],
-        fontSize=9,
-        leading=13,
     )
 
     story = []
 
     story.append(
         Paragraph(
-            "STUDENT PERFORMANCE PREDICTION",
-            title
+            "STUDENT PERFORMANCE PROGRESS REPORT",
+            title_style,
         )
     )
 
     story.append(
         Paragraph(
-            "STUDENT PROGRESS REPORT",
-            heading
+            "Student Performance Prediction System",
+            ParagraphStyle(
+                "Center",
+                parent=styles["Normal"],
+                alignment=TA_CENTER,
+                fontSize=11,
+            ),
         )
     )
 
-    details = Table(
-        [
-            ["Student Name", name],
-            ["University ID", university_id],
-            ["Department", branch],
-            ["Semester", semester],
-        ],
-        colWidths=[150, 320]
+    story.append(Spacer(1, 18))
+
+    student_details = [
+        ["Student Name", name],
+        ["University ID", university_id],
+        ["Branch", branch],
+    ]
+
+    table = Table(
+        student_details,
+        colWidths=[150, 330],
     )
 
-    details.setStyle(
-        TableStyle([
-            ("GRID", (0,0), (-1,-1), .5, colors.grey),
-            ("BACKGROUND", (0,0), (0,-1), colors.lightgrey),
-            ("FONTNAME", (0,0), (0,-1), "Helvetica-Bold"),
-            ("PADDING", (0,0), (-1,-1), 7),
-        ])
-    )
-
-    story.append(details)
-
-    story.append(
-        Spacer(1, 15)
-    )
-
-    if len(data) > 0:
-
-        overall = data[
-            "Performance_Percent"
-        ].mean()
-
-        story.append(
-            Paragraph(
-                f"<b>Overall Performance:</b> "
-                f"{overall:.2f}%",
-                heading
-            )
-        )
-
-    story.append(
-        Paragraph(
-            "SUBJECT-WISE PERFORMANCE",
-            heading
-        )
-    )
-
-    for _, row in data.iterrows():
-
-        table = Table(
+    table.setStyle(
+        TableStyle(
             [
-                ["Subject", str(row["Subject"])],
-                [
-                    "Attendance",
-                    f"{row['Attendance']:.1f}%"
-                ],
-                [
-                    "Attendance Mark",
-                    f"{attendance_mark(row['Attendance'])}/5"
-                ],
-                [
-                    "Study Hours",
-                    f"{row['Study_Hours']:.1f}/6"
-                ],
-                [
-                    "Internal",
-                    f"{row['Internal_Mark']:.1f}/40"
-                ],
-                [
-                    "Assignment",
-                    f"{row['Assignment']:.1f}/15"
-                ],
-                [
-                    "Previous Mark",
-                    f"{row['Previous_Mark']:.1f}/60"
-                ],
-                [
-                    "Performance",
-                    str(row["Performance"])
-                ],
-                [
-                    "Percentage",
-                    f"{row['Performance_Percent']:.2f}%"
-                ],
-                [
-                    "K-Means Cluster",
-                    str(row["KMeans_Cluster"])
-                ],
-            ],
-            colWidths=[170, 300]
+                ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
+                ("BACKGROUND", (0, 0), (0, -1), colors.lightgrey),
+                ("FONTNAME", (0, 0), (-1, -1), "Helvetica"),
+                ("FONTNAME", (0, 0), (0, -1), "Helvetica-Bold"),
+                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                ("PADDING", (0, 0), (-1, -1), 7),
+            ]
+        )
+    )
+
+    story.append(table)
+    story.append(Spacer(1, 18))
+
+    student_df = add_performance_columns(student_df)
+
+    overall = student_df["Overall_Percentage"].mean()
+
+    if overall < 50:
+        overall_level = "Low Performance"
+    elif overall < 65:
+        overall_level = "Average Performance"
+    elif overall < 80:
+        overall_level = "Above Average Performance"
+    else:
+        overall_level = "Good Performance"
+
+    story.append(
+        Paragraph(
+            "Overall Performance",
+            heading_style,
+        )
+    )
+
+    overall_table = Table(
+        [
+            ["Overall Percentage", f"{overall:.2f}%"],
+            ["Performance Level", overall_level],
+        ],
+        colWidths=[200, 280],
+    )
+
+    overall_table.setStyle(
+        TableStyle(
+            [
+                ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
+                ("BACKGROUND", (0, 0), (0, -1), colors.lightgrey),
+                ("FONTNAME", (0, 0), (0, -1), "Helvetica-Bold"),
+                ("PADDING", (0, 0), (-1, -1), 7),
+            ]
+        )
+    )
+
+    story.append(overall_table)
+    story.append(Spacer(1, 20))
+
+    story.append(
+        Paragraph(
+            "Subject-wise Performance",
+            heading_style,
+        )
+    )
+
+    data = [
+        [
+            "Subject",
+            "Attendance",
+            "Att. Mark",
+            "Study Hrs",
+            "Internal",
+            "Assignment",
+            "Previous",
+            "Performance",
+        ]
+    ]
+
+    for _, row in student_df.iterrows():
+
+        performance = calculate_performance(row)
+
+        data.append(
+            [
+                str(row["Subject"])[:25],
+                f'{float(row["Attendance"]):.1f}%',
+                str(performance["Attendance Mark"]),
+                f'{float(row["Study_Hours"]):.1f}',
+                f'{float(row["Internal"]):.1f}/40',
+                f'{float(row["Assignment"]):.1f}/15',
+                f'{float(row["Previous_Mark"]):.1f}/60',
+                performance["Performance"].replace(
+                    " Performance", ""
+                ),
+            ]
         )
 
-        table.setStyle(
-            TableStyle([
-                ("GRID", (0,0), (-1,-1), .5, colors.grey),
-                ("BACKGROUND", (0,0), (0,-1), colors.lightgrey),
-                ("FONTNAME", (0,0), (0,-1), "Helvetica-Bold"),
-                ("PADDING", (0,0), (-1,-1), 6),
-            ])
+    subject_table = Table(
+        data,
+        repeatRows=1,
+        colWidths=[
+            105,
+            58,
+            48,
+            50,
+            55,
+            58,
+            55,
+            75,
+        ],
+    )
+
+    subject_table.setStyle(
+        TableStyle(
+            [
+                ("GRID", (0, 0), (-1, -1), 0.4, colors.grey),
+                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#d9e2f3")),
+                ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                ("FONTSIZE", (0, 0), (-1, -1), 7),
+                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                ("PADDING", (0, 0), (-1, -1), 4),
+            ]
         )
+    )
 
-        story.append(table)
+    story.append(subject_table)
+    story.append(Spacer(1, 20))
 
-        story.append(
-            Paragraph(
-                "<b>Improvement / Guidance</b>",
-                normal
-            )
+    story.append(
+        Paragraph(
+            "Assessment Conversion",
+            heading_style,
         )
+    )
 
-        for item in guidance(row):
+    conversion_text = """
+    Attendance: 90–100% = 5 marks, 80–89% = 4 marks,
+    70–79% = 3 marks, 60–69% = 2 marks,
+    10–59% = 1 mark, below 10% = 0 marks.
+    <br/><br/>
+    Internal maximum = 40 marks.
+    Assignment maximum = 15 marks.
+    Previous mark maximum = 60 marks.
+    Study hours are normalized using 6 hours/day as the project maximum.
+    """
 
-            story.append(
-                Paragraph(
-                    "• " + item,
-                    normal
-                )
-            )
+    story.append(
+        Paragraph(
+            conversion_text,
+            styles["BodyText"],
+        )
+    )
 
-        story.append(
-            Spacer(1, 12)
+    story.append(Spacer(1, 15))
+
+    story.append(
+        Paragraph(
+            "Improvement / Feedback",
+            heading_style,
+        )
+    )
+
+    if overall < 50:
+        advice = (
+            "Focus on regular study, attendance, internal assessments, "
+            "assignments and revision of previous topics."
+        )
+    elif overall < 65:
+        advice = (
+            "Maintain regular study habits and improve attendance, "
+            "assignment completion and internal assessment performance."
+        )
+    elif overall < 80:
+        advice = (
+            "Good progress. Small improvements in attendance, internal "
+            "marks, assignments and study consistency can further improve performance."
+        )
+    else:
+        advice = (
+            "Excellent performance! Keep up the good work and maintain consistency."
         )
 
     story.append(
         Paragraph(
-            "Attendance Conversion: "
-            "90–100%=5, 80–89%=4, 70–79%=3, "
-            "60–69%=2, 10–59%=1, below 10%=0.",
-            normal
+            advice,
+            styles["BodyText"],
         )
     )
 
-    doc.build(story)
+    document.build(story)
 
     buffer.seek(0)
 
-    return buffer.getvalue()
+    return buffer
 
 
-# ==========================================================
+# ============================================================
 # HOME PAGE
-# ==========================================================
+# ============================================================
 
-def home():
+def home_page():
 
-    background()
-
-    st.markdown(
-        '<div class="login-wrapper">',
-        unsafe_allow_html=True
-    )
-
-    st.markdown(
-        '<div class="login-card">',
-        unsafe_allow_html=True
-    )
-
-    # MAIN HEADING ONLY
     st.markdown(
         """
-        <div class="main-heading">
-            🎓 STUDENT PERFORMANCE PREDICTION
+        <div class="front-wrapper">
+            <div class="front-card">
+                <div class="main-heading">
+                    🎓 STUDENT PERFORMANCE PREDICTION
+                </div>
+            </div>
         </div>
         """,
-        unsafe_allow_html=True
+        unsafe_allow_html=True,
     )
 
-    col1, col2 = st.columns(
-        2,
-        gap="large"
-    )
-
-    with col1:
-
-        st.markdown(
-            """
-            <div class="role-card">
-
-                <div class="role-icon">🎓</div>
-
-                <div class="role-title">
-                    STUDENT
-                </div>
-
-                <div class="role-description">
-                    Login to view your academic
-                    performance and progress report.
-                </div>
-
-            </div>
-            """,
-            unsafe_allow_html=True
-        )
-
-        st.write("")
-
-        if st.button(
-            "🎓 STUDENT LOGIN",
-            width="stretch"
-        ):
-
-            st.session_state.page = "student_login"
-
-            st.rerun()
+    col1, col2, col3 = st.columns([1, 2, 2])
 
     with col2:
 
         st.markdown(
             """
             <div class="role-card">
-
-                <div class="role-icon">👨‍🏫</div>
-
-                <div class="role-title">
-                    TUTOR
-                </div>
-
-                <div class="role-description">
-                    Login according to your department
-                    and manage student performance.
-                </div>
-
+                <div class="role-icon">🎓</div>
+                <div class="role-title">Student</div>
             </div>
             """,
-            unsafe_allow_html=True
+            unsafe_allow_html=True,
         )
 
-        st.write("")
-
         if st.button(
-            "👨‍🏫 TUTOR LOGIN",
-            width="stretch"
+            "🎓 Student Login",
+            key="student_role",
+            width="stretch",
         ):
-
-            st.session_state.page = "tutor_login"
-
+            st.session_state.role = "student"
+            st.session_state.page = "student_login"
             st.rerun()
 
-    st.markdown(
-        "</div></div>",
-        unsafe_allow_html=True
-    )
+    with col3:
+
+        st.markdown(
+            """
+            <div class="role-card">
+                <div class="role-icon">👨‍🏫</div>
+                <div class="role-title">Tutor</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+        if st.button(
+            "👨‍🏫 Tutor Login",
+            key="tutor_role",
+            width="stretch",
+        ):
+            st.session_state.role = "tutor"
+            st.session_state.page = "tutor_login"
+            st.rerun()
 
 
-# ==========================================================
+# ============================================================
 # STUDENT LOGIN
-# ==========================================================
+# ============================================================
 
 def student_login():
 
-    background()
-
-    st.markdown(
-        '<div class="login-wrapper">',
-        unsafe_allow_html=True
-    )
-
-    st.markdown(
-        '<div class="login-card">',
-        unsafe_allow_html=True
-    )
-
     st.markdown(
         """
-        <div class="main-heading">
-            🎓 STUDENT LOGIN
+        <div class="dashboard-header">
+            <div class="dashboard-title">
+                🎓 Student Login
+            </div>
         </div>
         """,
-        unsafe_allow_html=True
+        unsafe_allow_html=True,
     )
+
+    st.markdown('<div class="login-box">', unsafe_allow_html=True)
 
     username = st.text_input(
         "Username",
-        placeholder="Enter your username"
+        placeholder="Enter username",
     )
 
     university_id = st.text_input(
         "University ID",
-        placeholder="Enter your University ID"
+        placeholder="Enter University ID",
     )
 
     password = st.text_input(
         "Password",
         type="password",
-        placeholder="Example: BTECH2007"
+        placeholder="Example: BTECH2007",
     )
 
-    st.caption(
-        "Demo password format: BTECH2000 – BTECH2022"
-    )
+    col1, col2 = st.columns(2)
 
-    c1, c2 = st.columns(2)
-
-    with c1:
+    with col1:
 
         if st.button(
-            "🔐 LOGIN",
-            type="primary",
-            width="stretch"
+            "🔐 Login",
+            width="stretch",
         ):
 
-            if not username.strip():
+            if not username or not university_id or not password:
+                st.error("Please fill all fields.")
 
+            elif not valid_student_password(password):
                 st.error(
-                    "Please enter username."
-                )
-
-            elif not university_id.strip():
-
-                st.error(
-                    "Please enter University ID."
-                )
-
-            elif not valid_student_password(
-                password
-            ):
-
-                st.error(
-                    "Invalid password format. "
-                    "Use BTECH2000–BTECH2022."
+                    "Password must be in format BTECH2000 to BTECH2022."
                 )
 
             else:
 
                 df = load_data()
 
-                student = df[
-                    (
-                        df["Username"]
-                        .astype(str)
-                        .str.strip()
-                        == username.strip()
-                    )
-                    &
-                    (
-                        df["University_ID"]
-                        .astype(str)
-                        .str.strip()
-                        == university_id.strip()
-                    )
-                ]
-
-                if student.empty:
-
+                if df.empty:
                     st.error(
-                        "Student username or University ID "
-                        "was not found."
+                        "No student records found. Please contact your tutor."
                     )
 
                 else:
 
-                    st.session_state.student_logged_in = True
-
-                    st.session_state.student_username = (
-                        username.strip()
-                    )
-
-                    st.session_state.student_id = (
-                        university_id.strip()
-                    )
-
-                    st.session_state.student_name = (
-                        str(
-                            student.iloc[0][
-                                "Student_Name"
-                            ]
+                    matched = df[
+                        (
+                            df["University_ID"]
+                            .astype(str)
+                            .str.strip()
+                            == university_id.strip()
                         )
-                    )
+                    ]
 
-                    st.session_state.page = (
-                        "student_dashboard"
-                    )
+                    if matched.empty:
+                        st.error("University ID not found.")
 
-                    st.rerun()
+                    else:
 
-    with c2:
+                        student_name = str(
+                            matched.iloc[0]["Name"]
+                        )
+
+                        st.session_state.student_logged = True
+                        st.session_state.student_username = username
+                        st.session_state.student_id = university_id
+                        st.session_state.page = "student_dashboard"
+
+                        st.rerun()
+
+    with col2:
 
         if st.button(
-            "⬅ BACK",
-            width="stretch"
+            "⬅️ Back",
+            width="stretch",
         ):
-
             st.session_state.page = "home"
-
+            st.session_state.role = None
             st.rerun()
 
-    st.markdown(
-        "</div></div>",
-        unsafe_allow_html=True
+    st.markdown("</div>", unsafe_allow_html=True)
+
+    st.info(
+        "Demo password format: BTECH2000 to BTECH2022"
     )
 
 
-# ==========================================================
+# ============================================================
 # TUTOR LOGIN
-# ==========================================================
+# ============================================================
 
 def tutor_login():
 
-    background()
-
-    st.markdown(
-        '<div class="login-wrapper">',
-        unsafe_allow_html=True
-    )
-
-    st.markdown(
-        '<div class="login-card">',
-        unsafe_allow_html=True
-    )
-
     st.markdown(
         """
-        <div class="main-heading">
-            👨‍🏫 TUTOR LOGIN
+        <div class="dashboard-header">
+            <div class="dashboard-title">
+                👨‍🏫 Tutor Login
+            </div>
         </div>
         """,
-        unsafe_allow_html=True
+        unsafe_allow_html=True,
     )
 
-    department = st.selectbox(
-        "🏫 Department",
-        BRANCHES
+    st.markdown('<div class="login-box">', unsafe_allow_html=True)
+
+    branch = st.selectbox(
+        "Department / Branch",
+        BRANCHES,
     )
 
     username = st.text_input(
         "Tutor Username",
-        placeholder="Enter tutor username"
+        placeholder="Enter tutor username",
     )
 
     password = st.text_input(
         "Tutor Password",
         type="password",
-        placeholder="Enter tutor password"
+        placeholder="Enter tutor password",
     )
 
-    c1, c2 = st.columns(2)
+    col1, col2 = st.columns(2)
 
-    with c1:
+    with col1:
 
         if st.button(
-            "🔐 TUTOR LOGIN",
-            type="primary",
-            width="stretch"
+            "🔐 Tutor Login",
+            width="stretch",
         ):
 
-            account = TUTOR_ACCOUNTS[
-                department
+            correct_username, correct_password = TUTOR_ACCOUNTS[
+                branch
             ]
 
-            entered_user = username.strip()
-
-            entered_password = password
-
-            if not entered_user:
-
-                st.error(
-                    "Please enter tutor username."
-                )
-
-            elif not entered_password:
-
-                st.error(
-                    "Please enter tutor password."
-                )
-
-            elif (
-                entered_user
-                != account["username"]
+            if (
+                username == correct_username
+                and password == correct_password
             ):
 
-                st.error(
-                    "Incorrect username for this department."
-                )
-
-            elif (
-                entered_password
-                != account["password"]
-            ):
-
-                st.error(
-                    "Incorrect tutor password."
-                )
-
-            else:
-
-                st.session_state.tutor_logged_in = True
-
-                st.session_state.tutor_username = (
-                    entered_user
-                )
-
-                st.session_state.tutor_branch = (
-                    department
-                )
-
-                st.session_state.page = (
-                    "tutor_dashboard"
-                )
+                st.session_state.tutor_logged = True
+                st.session_state.tutor_branch = branch
+                st.session_state.tutor_username = username
+                st.session_state.page = "tutor_dashboard"
 
                 st.rerun()
 
-    with c2:
+            else:
+                st.error(
+                    "Invalid tutor username or password."
+                )
+
+    with col2:
 
         if st.button(
-            "⬅ BACK",
-            width="stretch"
+            "⬅️ Back",
+            width="stretch",
         ):
-
             st.session_state.page = "home"
-
+            st.session_state.role = None
             st.rerun()
 
-    st.markdown(
-        "</div></div>",
-        unsafe_allow_html=True
-    )
+    st.markdown("</div>", unsafe_allow_html=True)
 
 
-# ==========================================================
+# ============================================================
 # STUDENT DASHBOARD
-# ==========================================================
+# ============================================================
 
 def student_dashboard():
 
-    if not st.session_state.student_logged_in:
-
-        st.session_state.page = "student_login"
-
-        st.rerun()
-
     df = load_data()
 
-    username = st.session_state.student_username
-    university_id = st.session_state.student_id
-    student_name = st.session_state.student_name
+    student_id = st.session_state.student_id
 
     student_df = df[
-        (
-            df["Username"].astype(str).str.strip()
-            == username
-        )
-        &
-        (
-            df["University_ID"].astype(str).str.strip()
-            == university_id
-        )
+        df["University_ID"].astype(str).str.strip()
+        == str(student_id).strip()
     ].copy()
-
-    st.markdown(
-        f"""
-        <div class="dashboard-title">
-            🎓 {student_name}
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
-
-    if st.button("🚪 Logout"):
-
-        st.session_state.student_logged_in = False
-        st.session_state.page = "home"
-
-        st.rerun()
 
     if student_df.empty:
 
-        st.warning(
-            "No performance data found."
-        )
+        st.error("Student data not found.")
+
+        if st.button("Logout"):
+            logout()
 
         return
 
-    semester_list = list(
-        student_df["Semester"]
-        .astype(str)
-        .unique()
+    student_name = str(student_df.iloc[0]["Name"])
+    branch = str(student_df.iloc[0]["Branch"])
+
+    # ---------------- HEADER ----------------
+
+    st.markdown(
+        f"""
+        <div class="dashboard-header">
+            <div class="dashboard-title">
+                🎓 {student_name}
+            </div>
+            <div class="dashboard-subtitle">
+                Student Performance Dashboard
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
     )
 
-    semester = st.selectbox(
-        "📚 Select Semester",
-        semester_list
+    # ---------------- SEMESTER ----------------
+
+    selected_semester = st.selectbox(
+        "Select Semester",
+        list(SEMESTERS.keys()),
     )
 
-    data = student_df[
+    subjects = SEMESTERS[selected_semester]
+
+    semester_df = student_df[
         student_df["Semester"].astype(str)
-        == semester
+        == selected_semester
     ].copy()
 
-    overall = data[
-        "Performance_Percent"
-    ].mean()
+    if semester_df.empty:
 
-    st.metric(
-        "Overall Performance",
-        f"{overall:.2f}%"
-    )
+        st.warning(
+            f"No tutor-entered records are available for {selected_semester}."
+        )
 
-    st.subheader(
-        "📚 Subject-wise Performance"
-    )
+        st.info(
+            "The tutor must add the student's subject records for this semester."
+        )
 
-    for _, row in data.iterrows():
+    else:
 
-        with st.expander(
-            f"📘 {row['Subject']}"
-        ):
+        semester_df = add_performance_columns(
+            semester_df
+        )
 
-            st.write(
-                f"**Performance:** "
-                f"{row['Performance']}"
+        # ---------------- OVERALL ----------------
+
+        overall = semester_df[
+            "Overall_Percentage"
+        ].mean()
+
+        if overall < 50:
+            level = "Low Performance"
+            emoji = "🔴"
+        elif overall < 65:
+            level = "Average Performance"
+            emoji = "🟠"
+        elif overall < 80:
+            level = "Above Average Performance"
+            emoji = "🟡"
+        else:
+            level = "Good Performance"
+            emoji = "🟢"
+
+        st.markdown(
+            f"""
+            <div class="section-card">
+                <h2 style="text-align:center;">
+                    Overall Performance
+                </h2>
+
+                <div class="performance-circle">
+                    {emoji}
+                </div>
+
+                <h2 style="text-align:center;">
+                    {overall:.2f}%
+                </h2>
+
+                <p style="text-align:center;font-size:18px;">
+                    {level}
+                </p>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+        # ---------------- SUBJECTS ----------------
+
+        st.markdown(
+            """
+            <div class="section-card">
+                <h2 style="text-align:center;">
+                    📚 Subject-wise Performance
+                </h2>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+        for _, row in semester_df.iterrows():
+
+            result = calculate_performance(row)
+
+            st.markdown(
+                f"""
+                <div class="subject-card">
+
+                    <div class="subject-title">
+                        📘 {row["Subject"]}
+                    </div>
+
+                    <div style="text-align:center;">
+                        <div class="performance-circle"
+                             style="color:{result["Color"]};">
+                            {result["Emoji"]}
+                        </div>
+
+                        <h3>
+                            {result["Performance"]}
+                        </h3>
+
+                        <p>
+                            Overall: {result["Overall Percentage"]:.2f}%
+                        </p>
+                    </div>
+
+                </div>
+                """,
+                unsafe_allow_html=True,
             )
 
-            st.write(
-                f"**Percentage:** "
-                f"{row['Performance_Percent']:.2f}%"
-            )
+            c1, c2, c3, c4, c5 = st.columns(5)
 
-            c1, c2, c3 = st.columns(3)
-
-            c1.metric(
-                "Attendance",
-                f"{row['Attendance']:.1f}%"
-            )
-
-            c2.metric(
-                "Internal",
-                f"{row['Internal_Mark']:.1f}/40"
-            )
-
-            c3.metric(
-                "Assignment",
-                f"{row['Assignment']:.1f}/15"
-            )
-
-            c1.metric(
-                "Previous Mark",
-                f"{row['Previous_Mark']:.1f}/60"
-            )
-
-            c2.metric(
-                "Study Hours",
-                f"{row['Study_Hours']:.1f}/6"
-            )
-
-            st.write(
-                "**Improvement / Guidance:**"
-            )
-
-            for item in guidance(row):
-
-                st.write(
-                    f"• {item}"
+            with c1:
+                st.metric(
+                    "Attendance",
+                    f'{float(row["Attendance"]):.1f}%',
                 )
 
-    pdf = make_pdf(
-        student_name,
-        university_id,
-        str(data.iloc[0]["Branch"]),
-        semester,
-        data
-    )
+            with c2:
+                st.metric(
+                    "Internal",
+                    f'{float(row["Internal"]):.1f}/40',
+                )
 
-    st.download_button(
-        "📄 DOWNLOAD MY PROGRESS REPORT",
-        pdf,
-        f"{student_name}_{semester}_Report.pdf",
-        "application/pdf",
-        width="stretch"
-    )
+            with c3:
+                st.metric(
+                    "Assignment",
+                    f'{float(row["Assignment"]):.1f}/15',
+                )
+
+            with c4:
+                st.metric(
+                    "Previous",
+                    f'{float(row["Previous_Mark"]):.1f}/60',
+                )
+
+            with c5:
+                st.metric(
+                    "Study Hours",
+                    f'{float(row["Study_Hours"]):.1f}',
+                )
+
+        # ---------------- DOWNLOAD PDF ----------------
+
+        pdf = create_student_pdf(
+            semester_df
+        )
+
+        if pdf:
+
+            st.download_button(
+                label="📄 Download My Progress Report",
+                data=pdf,
+                file_name=f"{student_name}_Progress_Report.pdf",
+                mime="application/pdf",
+                width="stretch",
+            )
+
+    st.divider()
+
+    if st.button(
+        "🚪 Logout",
+        width="stretch",
+    ):
+        logout()
 
 
-# ==========================================================
+# ============================================================
 # TUTOR DASHBOARD
-# ==========================================================
+# ============================================================
 
 def tutor_dashboard():
-
-    if not st.session_state.tutor_logged_in:
-
-        st.session_state.page = "tutor_login"
-
-        st.rerun()
 
     branch = st.session_state.tutor_branch
 
     st.markdown(
-        """
-        <div class="dashboard-title">
-            👨‍🏫 TUTOR DASHBOARD
+        f"""
+        <div class="dashboard-header">
+
+            <div class="dashboard-title">
+                👨‍🏫 Tutor Dashboard
+            </div>
+
+            <div class="dashboard-subtitle">
+                {branch}
+            </div>
+
         </div>
         """,
-        unsafe_allow_html=True
+        unsafe_allow_html=True,
     )
-
-    st.success(
-        f"Logged in department: {branch}"
-    )
-
-    if st.button("🚪 Logout"):
-
-        st.session_state.tutor_logged_in = False
-        st.session_state.page = "home"
-
-        st.rerun()
 
     df = load_data()
 
-    branch_df = df[
-        df["Branch"].astype(str)
-        == branch
-    ].copy()
+    # Only branch students
+    if not df.empty and "Branch" in df.columns:
 
-    tabs = st.tabs([
-        "➕ Add Student",
-        "📊 Student Data",
-        "🤖 K-Means",
-        "🌲 Random Forest",
-        "📄 Progress Reports",
-    ])
+        branch_df = df[
+            df["Branch"].astype(str).str.strip()
+            == branch.strip()
+        ].copy()
 
+    else:
 
-    # ======================================================
+        branch_df = pd.DataFrame()
+
+    # ========================================================
+    # TABS
+    # ========================================================
+
+    tabs = st.tabs(
+        [
+            "➕ Add Student",
+            "📋 Student Data",
+            "📊 K-Means",
+            "🌲 Random Forest",
+            "📄 Progress Reports",
+        ]
+    )
+
+    # ========================================================
     # ADD STUDENT
-    # ======================================================
+    # ========================================================
 
     with tabs[0]:
 
-        st.subheader(
-            "➕ Add Student"
+        st.markdown(
+            """
+            <div class="section-card">
+                <h2 style="text-align:center;">
+                    Add Student Performance
+                </h2>
+            </div>
+            """,
+            unsafe_allow_html=True,
         )
 
-        name = st.text_input(
-            "Student Name"
-        )
+        col1, col2 = st.columns(2)
 
-        username = st.text_input(
-            "Student Username"
-        )
+        with col1:
 
-        university_id = st.text_input(
-            "University ID"
-        )
+            student_name = st.text_input(
+                "Student Name",
+                key="add_name",
+            )
+
+        with col2:
+
+            university_id = st.text_input(
+                "University ID",
+                key="add_uid",
+            )
 
         semester = st.selectbox(
             "Semester",
-            list(SEMESTERS.keys())
+            list(SEMESTERS.keys()),
+            key="add_semester",
         )
+
+        st.markdown(
+            "### Enter Subject-wise Marks"
+        )
+
+        selected_subjects = SEMESTERS[
+            semester
+        ]
 
         records = []
 
-        st.markdown(
-            "### Subject-wise Details"
-        )
-
-        for subject in SEMESTERS[
-            semester
-        ]:
+        for subject in selected_subjects:
 
             st.markdown(
                 f"#### 📘 {subject}"
@@ -2164,343 +1642,358 @@ def tutor_dashboard():
                     "Attendance %",
                     min_value=0.0,
                     max_value=100.0,
-                    value=75.0,
-                    key=f"attendance_{subject}"
+                    value=80.0,
+                    step=1.0,
+                    key=f"att_{semester}_{subject}",
                 )
 
             with c2:
+
+                study_hours = st.number_input(
+                    "Study Hours",
+                    min_value=0.0,
+                    max_value=6.0,
+                    value=3.0,
+                    step=0.5,
+                    key=f"study_{semester}_{subject}",
+                )
+
+            with c3:
 
                 internal = st.number_input(
                     "Internal /40",
                     min_value=0.0,
                     max_value=40.0,
-                    value=20.0,
-                    key=f"internal_{subject}"
+                    value=25.0,
+                    step=1.0,
+                    key=f"internal_{semester}_{subject}",
                 )
 
-            with c3:
+            with c4:
 
                 assignment = st.number_input(
                     "Assignment /15",
                     min_value=0.0,
                     max_value=15.0,
-                    value=8.0,
-                    key=f"assignment_{subject}"
+                    value=10.0,
+                    step=1.0,
+                    key=f"assignment_{semester}_{subject}",
                 )
 
-            with c4:
+            with c5:
 
                 previous = st.number_input(
                     "Previous /60",
                     min_value=0.0,
                     max_value=60.0,
-                    value=30.0,
-                    key=f"previous_{subject}"
+                    value=35.0,
+                    step=1.0,
+                    key=f"previous_{semester}_{subject}",
                 )
 
-            with c5:
-
-                study = st.number_input(
-                    "Study Hours /6",
-                    min_value=0.0,
-                    max_value=6.0,
-                    value=3.0,
-                    step=.5,
-                    key=f"study_{subject}"
-                )
-
-            percentage, performance = calculate_performance(
-                attendance,
-                internal,
-                assignment,
-                previous,
-                study
+            records.append(
+                {
+                    "Name": student_name,
+                    "University_ID": university_id,
+                    "Branch": branch,
+                    "Semester": semester,
+                    "Subject": subject,
+                    "Attendance": attendance,
+                    "Study_Hours": study_hours,
+                    "Internal": internal,
+                    "Assignment": assignment,
+                    "Previous_Mark": previous,
+                }
             )
 
-            records.append({
-                "Student_Name": name,
-                "Username": username,
-                "University_ID": university_id,
-                "Branch": branch,
-                "Semester": semester,
-                "Subject": subject,
-                "Attendance": attendance,
-                "Internal_Mark": internal,
-                "Assignment": assignment,
-                "Previous_Mark": previous,
-                "Study_Hours": study,
-                "Performance": performance,
-                "Performance_Percent": percentage,
-                "KMeans_Cluster": np.nan,
-            })
-
         if st.button(
-            "💾 SAVE STUDENT",
-            type="primary",
-            width="stretch"
+            "💾 Save Student Records",
+            width="stretch",
         ):
 
-            if not name.strip():
-
-                st.error(
-                    "Enter student name."
-                )
-
-            elif not username.strip():
-
-                st.error(
-                    "Enter student username."
-                )
+            if not student_name.strip():
+                st.error("Enter student name.")
 
             elif not university_id.strip():
-
-                st.error(
-                    "Enter University ID."
-                )
+                st.error("Enter University ID.")
 
             else:
 
-                new_data = pd.DataFrame(
-                    records
+                new_df = pd.DataFrame(records)
+
+                old_df = load_data()
+
+                # Remove existing same student + same semester
+                if not old_df.empty:
+
+                    old_df = old_df[
+                        ~(
+                            (old_df["University_ID"].astype(str)
+                             == university_id.strip())
+                            &
+                            (old_df["Semester"].astype(str)
+                             == semester)
+                        )
+                    ]
+
+                final_df = pd.concat(
+                    [old_df, new_df],
+                    ignore_index=True,
                 )
 
-                old_data = load_data()
-
-                # Replace the same student semester
-                old_data = old_data[
-                    ~(
-                        (
-                            old_data[
-                                "University_ID"
-                            ].astype(str)
-                            == university_id
-                        )
-                        &
-                        (
-                            old_data[
-                                "Semester"
-                            ].astype(str)
-                            == semester
-                        )
-                        &
-                        (
-                            old_data[
-                                "Branch"
-                            ].astype(str)
-                            == branch
-                        )
-                    )
-                ]
-
-                final_data = pd.concat(
-                    [
-                        old_data,
-                        new_data
-                    ],
-                    ignore_index=True
-                )
-
-                save_data(
-                    final_data
-                )
+                save_data(final_df)
 
                 st.success(
-                    "Student saved successfully."
+                    f"Saved {student_name}'s {semester} records successfully."
                 )
 
                 st.rerun()
 
-
-    # ======================================================
+    # ========================================================
     # STUDENT DATA
-    # ======================================================
+    # ========================================================
 
     with tabs[1]:
 
-        st.subheader(
-            "📊 Department Student Data"
+        st.markdown(
+            """
+            <div class="section-card">
+                <h2 style="text-align:center;">
+                    📋 Student Data
+                </h2>
+            </div>
+            """,
+            unsafe_allow_html=True,
         )
 
         if branch_df.empty:
 
             st.info(
-                "No student records available."
+                "No student records available for this department."
             )
 
         else:
 
-            st.dataframe(
-                branch_df,
-                width="stretch",
-                hide_index=True
+            display_df = add_performance_columns(
+                branch_df
             )
 
-            csv_data = branch_df.to_csv(
-                index=False
-            ).encode("utf-8")
+            st.dataframe(
+                display_df,
+                width="stretch",
+                hide_index=True,
+            )
 
             st.download_button(
-                "⬇️ DOWNLOAD DEPARTMENT CSV",
-                csv_data,
-                "department_data.csv",
-                "text/csv",
-                width="stretch"
+                "⬇️ Download Branch CSV",
+                data=display_df.to_csv(index=False).encode(
+                    "utf-8"
+                ),
+                file_name="branch_student_data.csv",
+                mime="text/csv",
+                width="stretch",
             )
 
-            st.markdown(
-                "### 🗑️ Delete Student"
+            st.markdown("### 🗑️ Delete Student")
+
+            student_ids = (
+                branch_df["University_ID"]
+                .astype(str)
+                .unique()
+                .tolist()
             )
 
-            students = (
-                branch_df[
-                    [
-                        "Student_Name",
-                        "University_ID"
-                    ]
-                ]
-                .drop_duplicates()
-            )
-
-            choices = [
-                f"{row.Student_Name} | "
-                f"{row.University_ID}"
-                for row in students.itertuples()
-            ]
-
-            selected = st.selectbox(
-                "Select student",
-                choices
+            selected_delete = st.selectbox(
+                "Select University ID",
+                student_ids,
             )
 
             if st.button(
-                "🗑️ DELETE STUDENT"
+                "🗑️ Delete Complete Student History",
+                width="stretch",
             ):
 
-                selected_id = (
-                    selected.split("|")[1].strip()
-                )
-
-                all_data = load_data()
-
-                all_data = all_data[
-                    ~(
-                        (
-                            all_data[
-                                "Branch"
-                            ].astype(str)
-                            == branch
-                        )
-                        &
-                        (
-                            all_data[
-                                "University_ID"
-                            ].astype(str)
-                            == selected_id
-                        )
-                    )
+                remaining = branch_df[
+                    branch_df["University_ID"].astype(str)
+                    != selected_delete
                 ]
 
-                save_data(
-                    all_data
+                # Keep records from other branches
+                other_branches = df[
+                    df["Branch"].astype(str).str.strip()
+                    != branch.strip()
+                ]
+
+                final_df = pd.concat(
+                    [
+                        other_branches,
+                        remaining,
+                    ],
+                    ignore_index=True,
                 )
 
+                save_data(final_df)
+
                 st.success(
-                    "Student history deleted."
+                    "Student history deleted successfully."
                 )
 
                 st.rerun()
 
-
-    # ======================================================
+    # ========================================================
     # K-MEANS
-    # ======================================================
+    # ========================================================
 
     with tabs[2]:
 
-        st.subheader(
-            "🤖 K-Means Clustering"
+        st.markdown(
+            """
+            <div class="section-card">
+                <h2 style="text-align:center;">
+                    📊 K-Means Student Clustering
+                </h2>
+
+                <p style="text-align:center;color:#aebbd0;">
+                    Clusters are groups identified from student performance features.
+                    Cluster numbers are identifiers, not official grades.
+                </p>
+            </div>
+            """,
+            unsafe_allow_html=True,
         )
 
-        if len(branch_df) < 3:
+        if branch_df.empty:
 
-            st.warning(
-                "At least 3 records are required."
-            )
+            st.info("No data available for K-Means.")
 
         else:
 
-            clustered, score = run_kmeans(
+            clustered, model, score = run_kmeans(
                 branch_df
             )
 
-            if score is not None:
+            if model is None:
 
-                st.metric(
-                    "Silhouette Score",
-                    f"{score:.4f}"
+                st.warning(
+                    "At least 3 valid records are required."
                 )
 
-            st.dataframe(
-                clustered[
-                    [
-                        "Student_Name",
-                        "University_ID",
-                        "Subject",
-                        "Performance",
-                        "KMeans_Cluster"
-                    ]
-                ],
-                width="stretch",
-                hide_index=True
-            )
+            else:
 
-            st.info(
-                "K-Means cluster numbers are identifiers, "
-                "not official grades."
-            )
+                c1, c2 = st.columns(2)
 
+                with c1:
 
-    # ======================================================
+                    st.metric(
+                        "Number of Clusters",
+                        model.n_clusters,
+                    )
+
+                with c2:
+
+                    if score is not None:
+
+                        st.metric(
+                            "Silhouette Score",
+                            f"{score:.3f}",
+                        )
+
+                    else:
+
+                        st.metric(
+                            "Silhouette Score",
+                            "N/A",
+                        )
+
+                st.dataframe(
+                    clustered[
+                        [
+                            "Name",
+                            "University_ID",
+                            "Subject",
+                            "KMeans_Cluster",
+                        ]
+                    ],
+                    width="stretch",
+                    hide_index=True,
+                )
+
+    # ========================================================
     # RANDOM FOREST
-    # ======================================================
+    # ========================================================
 
     with tabs[3]:
 
-        st.subheader(
-            "🌲 Random Forest"
+        st.markdown(
+            """
+            <div class="section-card">
+                <h2 style="text-align:center;">
+                    🌲 Random Forest Prediction
+                </h2>
+            </div>
+            """,
+            unsafe_allow_html=True,
         )
 
-        model, accuracy = train_random_forest(
-            branch_df
-        )
+        if branch_df.empty:
 
-        if model is None:
-
-            st.warning(
-                "At least 10 suitable records are "
-                "recommended for model training."
+            st.info(
+                "Add student data before running Random Forest."
             )
 
         else:
 
-            st.metric(
-                "Random Forest Accuracy",
-                f"{accuracy * 100:.2f}%"
+            rf_model, rf_data, accuracy = create_rf_model(
+                branch_df
             )
 
-            st.success(
-                "Random Forest model trained successfully."
-            )
+            if rf_model is None:
 
+                st.warning(
+                    "More student records with multiple performance classes are required."
+                )
 
-    # ======================================================
-    # REPORTS
-    # ======================================================
+            else:
+
+                st.metric(
+                    "Random Forest Accuracy",
+                    f"{accuracy * 100:.2f}%",
+                )
+
+                st.dataframe(
+                    rf_data[
+                        [
+                            "Name",
+                            "University_ID",
+                            "Subject",
+                            "Performance",
+                            "Overall_Percentage",
+                        ]
+                    ],
+                    width="stretch",
+                    hide_index=True,
+                )
+
+                st.info(
+                    "This project uses Random Forest as a demonstration "
+                    "of supervised performance classification."
+                )
+
+    # ========================================================
+    # PROGRESS REPORTS
+    # ========================================================
 
     with tabs[4]:
 
-        st.subheader(
-            "📄 Progress Reports"
+        st.markdown(
+            """
+            <div class="section-card">
+                <h2 style="text-align:center;">
+                    📄 Student Progress Reports
+                </h2>
+            </div>
+            """,
+            unsafe_allow_html=True,
         )
 
         if branch_df.empty:
@@ -2511,89 +2004,115 @@ def tutor_dashboard():
 
         else:
 
-            students = (
+            student_options = (
                 branch_df[
                     [
-                        "Student_Name",
                         "University_ID",
-                        "Semester"
+                        "Name",
                     ]
                 ]
                 .drop_duplicates()
+                .reset_index(drop=True)
             )
-
-            choices = [
-                f"{row.Student_Name} | "
-                f"{row.University_ID} | "
-                f"{row.Semester}"
-                for row in students.itertuples()
-            ]
 
             selected = st.selectbox(
                 "Select Student",
-                choices
+                student_options.index,
+                format_func=lambda x:
+                    f"{student_options.loc[x, 'Name']} — "
+                    f"{student_options.loc[x, 'University_ID']}",
             )
 
-            name, university_id, semester = [
-                x.strip()
-                for x in selected.split("|")
-            ]
+            selected_id = str(
+                student_options.loc[
+                    selected,
+                    "University_ID",
+                ]
+            )
 
-            report_data = branch_df[
-                (
-                    branch_df[
-                        "Student_Name"
-                    ].astype(str)
-                    == name
-                )
-                &
-                (
-                    branch_df[
-                        "University_ID"
-                    ].astype(str)
-                    == university_id
-                )
-                &
-                (
-                    branch_df[
-                        "Semester"
-                    ].astype(str)
-                    == semester
-                )
+            selected_student = branch_df[
+                branch_df["University_ID"].astype(str)
+                == selected_id
             ].copy()
 
-            st.dataframe(
-                report_data,
-                width="stretch",
-                hide_index=True
+            pdf = create_student_pdf(
+                selected_student
             )
 
-            pdf = make_pdf(
-                name,
-                university_id,
-                branch,
-                semester,
-                report_data
-            )
+            if pdf:
 
-            st.download_button(
-                "📄 DOWNLOAD PROGRESS REPORT",
-                pdf,
-                f"{name}_{semester}_Progress_Report.pdf",
-                "application/pdf",
-                width="stretch"
-            )
+                st.download_button(
+                    "📄 Download Student Progress Report",
+                    data=pdf,
+                    file_name=(
+                        f"{selected_student.iloc[0]['Name']}"
+                        "_Progress_Report.pdf"
+                    ),
+                    mime="application/pdf",
+                    width="stretch",
+                )
+
+                st.markdown(
+                    "### Preview"
+                )
+
+                preview = add_performance_columns(
+                    selected_student
+                )
+
+                st.dataframe(
+                    preview[
+                        [
+                            "Semester",
+                            "Subject",
+                            "Attendance",
+                            "Internal",
+                            "Assignment",
+                            "Previous_Mark",
+                            "Overall_Percentage",
+                            "Performance",
+                        ]
+                    ],
+                    width="stretch",
+                    hide_index=True,
+                )
+
+    st.divider()
+
+    if st.button(
+        "🚪 Logout",
+        width="stretch",
+    ):
+        logout()
 
 
-# ==========================================================
-# ROUTER
-# ==========================================================
+# ============================================================
+# LOGOUT
+# ============================================================
 
-load_css()
+def logout():
+
+    st.session_state.page = "home"
+    st.session_state.role = None
+    st.session_state.student_logged = False
+    st.session_state.tutor_logged = False
+    st.session_state.student_username = ""
+    st.session_state.student_id = ""
+    st.session_state.tutor_branch = ""
+    st.session_state.tutor_username = ""
+
+    st.rerun()
+
+
+# ============================================================
+# MAIN ROUTER
+# ============================================================
+
+ensure_data_file()
 
 if st.session_state.page == "home":
 
-    home()
+    home_page()
 
 elif st.session_state.page == "student_login":
 
@@ -2605,8 +2124,21 @@ elif st.session_state.page == "tutor_login":
 
 elif st.session_state.page == "student_dashboard":
 
-    student_dashboard()
+    if st.session_state.student_logged:
+        student_dashboard()
+    else:
+        st.session_state.page = "student_login"
+        st.rerun()
 
 elif st.session_state.page == "tutor_dashboard":
 
-    tutor_dashboard()
+    if st.session_state.tutor_logged:
+        tutor_dashboard()
+    else:
+        st.session_state.page = "tutor_login"
+        st.rerun()
+
+else:
+
+    st.session_state.page = "home"
+    st.rerun()
