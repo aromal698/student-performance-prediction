@@ -1236,7 +1236,7 @@ def home_page():
         st.session_state.page="teacher_login"; st.rerun()
     if b.button("🎓 Student Login",use_container_width=True):
         st.session_state.page="student_login"; st.rerun()
-    if c.button("🪪 Smart Card Registration",use_container_width=True):
+    if c.button("🪪 Student Smart Card (Self Registration)",use_container_width=True):
         st.session_state.page="smart_card"; st.rerun()
 
 
@@ -1326,54 +1326,42 @@ def smart_card_page():
     """
     app_brand()
     st.title("🪪 Student Smart Card")
-    st.caption("Full student details • large readable card • colorful identity-card design")
+    st.caption("🎓 Student self-service registration • Fill your own complete details • No tutor marks required")
 
+    # IMPORTANT: Smart Card registration is a separate STUDENT self-service
+    # workflow. It does NOT require tutor marks or tutor registration.
     logged_student = st.session_state.get("student_report") or {}
     uid = _clean_smart_card_value(logged_student.get("University_ID"))
 
     if not uid:
-        uid = st.text_input("University ID", placeholder="e.g. SNM25CE001").strip()
+        uid = st.text_input("University ID *", placeholder="e.g. SNM25CE001", key="smart_self_uid").strip()
 
     if not uid:
-        st.info("Enter your University ID to continue.")
+        st.info("Enter your University ID to start your own Smart Card registration.")
         if st.button("← Back to Home", use_container_width=True):
             st.session_state.page = "home"
             st.rerun()
         return
 
-    # Registered student profile: local first, cloud fallback.
-    reg = find_registration(uid)
+    # Existing tutor/student profile is only used for optional pre-filling.
+    # A student is still allowed to complete the entire Smart Card personally.
+    reg = find_registration(uid) or {}
     if not reg:
         try:
             sb = _get_shared_supabase()
             if sb is not None:
-                cloud_rows = (
-                    sb.table("students")
+                cloud_rows = (sb.table("students")
                     .select("university_id,student_name,department,semester,registered_at")
-                    .eq("university_id", uid)
-                    .limit(1)
-                    .execute()
-                    .data
-                    or []
-                )
+                    .eq("university_id", uid).limit(1).execute().data or [])
                 if cloud_rows:
                     r = cloud_rows[0]
-                    reg = {
-                        "University_ID": r.get("university_id", uid),
-                        "Student_Name": r.get("student_name", ""),
-                        "Department": r.get("department", ""),
-                        "Semester": r.get("semester", ""),
-                        "Registered_Time": r.get("registered_at", ""),
-                    }
+                    reg = {"University_ID": r.get("university_id", uid),
+                           "Student_Name": r.get("student_name", ""),
+                           "Department": r.get("department", ""),
+                           "Semester": r.get("semester", ""),
+                           "Registered_Time": r.get("registered_at", "")}
         except Exception:
-            reg = None
-
-    if not reg:
-        st.error("Student profile not found. Please register with your tutor first.")
-        if st.button("← Back", use_container_width=True):
-            st.session_state.page = "home"
-            st.rerun()
-        return
+            pass
 
     existing = find_smart_card_registration(uid)
     groups = ["A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"]
@@ -1424,14 +1412,14 @@ def smart_card_page():
 
         c1, c2 = st.columns(2)
         department = c1.text_input(
-            "Department",
-            value=_clean_smart_card_value(reg.get("Department")),
-            disabled=True,
+            "Department *",
+            value=_clean_smart_card_value((existing or {}).get("Department")) or _clean_smart_card_value(reg.get("Department")),
+            placeholder="e.g. Civil Engineering",
         )
         semester = c2.text_input(
-            "Semester",
-            value=_clean_smart_card_value(reg.get("Semester")),
-            disabled=True,
+            "Semester *",
+            value=_clean_smart_card_value((existing or {}).get("Semester")) or _clean_smart_card_value(reg.get("Semester")),
+            placeholder="e.g. S3",
         )
 
         c1, c2 = st.columns(2)
@@ -1460,7 +1448,7 @@ def smart_card_page():
         university = university.strip()
         cgpa = cgpa.strip()
 
-        if not all([registration_id, name, address, pin, college, university]):
+        if not all([registration_id, uid, name, address, pin, college, department, semester, university]):
             st.error("Please fill all required fields marked with *.")
             return
 
@@ -1876,7 +1864,7 @@ def student_dashboard():
     st.title(f"🎓 Welcome, {profile.get('Student_Name','Student')}")
     st.caption(f"University ID: {uid}  •  {profile.get('Semester','')}  •  {profile.get('Department','')}")
     c1,c2=st.columns(2)
-    if c1.button("🪪 Smart Card Registration",use_container_width=True,type="primary"):
+    if c1.button("🪪 Student Smart Card (Self Registration)",use_container_width=True,type="primary"):
         st.session_state.smart_card_registration=find_smart_card_registration(uid); st.session_state.smart_card_hidden=False; st.session_state.page="smart_card"; st.rerun()
     if c2.button("🚪 Logout",use_container_width=True):
         audit("Student Logout","Student","",uid,profile.get("Department",""),profile.get("Semester",""),"Logout")
