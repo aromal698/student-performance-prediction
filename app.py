@@ -43,7 +43,8 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
-DATA_DIR = "data"
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DATA_DIR = os.path.join(BASE_DIR, "data")
 os.makedirs(DATA_DIR, exist_ok=True)
 REPORT_FILE = os.path.join(DATA_DIR, "student_reports.csv")
 REGISTRATION_FILE = os.path.join(DATA_DIR, "student_registrations.csv")
@@ -1346,33 +1347,16 @@ def student_dashboard():
 
     st.subheader("📊 Calculate My Mark")
     subjects=parse_subjects(report["Subjects_JSON"])
-    # Student enters ONE total daily study-hours value, shared across all subjects.
-    saved_hours = 0.0
-    if subjects:
-        try:
-            saved_hours = float(subjects[0].get("Study_Hours", 0.0))
-        except (TypeError, ValueError):
-            saved_hours = 0.0
     with st.form("study_hours_form"):
-        total_study_hours = st.number_input(
-            "📚 Total daily study hours (all subjects)",
-            min_value=0.0,
-            max_value=24.0,
-            value=max(0.0, min(saved_hours, 24.0)),
-            step=0.5,
-            help="Enter your total study time per day. The same value is used for the performance calculation across the registered subjects."
-        )
+        st.caption("Enter your total daily study hours once. This value is applied consistently to all subjects for the prediction.")
+        total_study_hours=st.number_input("⏱️ Total daily study hours",0.0,24.0,2.0,0.5,key="student_total_study_hours")
         calculate=st.form_submit_button("📊 Calculate My Result",use_container_width=True,type="primary")
     if calculate:
         updated=[]
         for item in subjects:
-            copy=dict(item)
-            copy["Study_Hours"]=float(total_study_hours)
-            updated.append(normalize_subject(copy))
-        report["Subjects_JSON"]=json.dumps(updated)
-        subjects=updated
-        st.session_state.student_report=report
-        audit("Calculate My Mark","Student","",uid,profile.get("Department",""),profile.get("Semester",""),f"Student calculated performance; total daily study hours={total_study_hours}")
+            copy=dict(item); copy["Study_Hours"]=float(total_study_hours); updated.append(normalize_subject(copy))
+        report["Subjects_JSON"]=json.dumps(updated); subjects=updated; st.session_state.student_report=report
+        audit("Calculate My Mark","Student","",uid,profile.get("Department",""),profile.get("Semester",""),f"Total daily study hours={total_study_hours}")
 
     subjects=parse_subjects(st.session_state.student_report["Subjects_JSON"])
     overall=float(np.mean([x["Overall"] for x in subjects])) if subjects else 0
