@@ -1192,7 +1192,8 @@ def all_department_dashboard():
 # CSV TEMPLATE / IMPORT
 # ============================================================
 def template_df():
-    cols = ["Username", "Student_Name", "University_ID", "Semester", "Department"]
+    # CSV template follows the current University-ID-only student workflow.
+    cols = ["Student_Name", "University_ID", "Semester"]
     for i in range(1, 7):
         cols += [f"Subject_{i}", f"Attendance_{i}", f"Internal_{i}", f"Assignment_{i}", f"Previous_{i}"]
     return pd.DataFrame(columns=cols)
@@ -1200,22 +1201,38 @@ def template_df():
 
 def uploaded_to_reports(uploaded_file, tutor_department):
     df = pd.read_csv(uploaded_file)
-    required = ["Username", "Student_Name", "University_ID", "Semester"]
+    required = ["Student_Name", "University_ID", "Semester"]
     missing = [c for c in required if c not in df.columns]
     if missing:
         raise ValueError("Missing required columns: " + ", ".join(missing))
 
     reports = []
     for _, row in df.iterrows():
+        uid = str(row["University_ID"]).strip()
+        name = str(row["Student_Name"]).strip()
         semester = str(row["Semester"]).strip().upper()
+        if not uid or not name:
+            raise ValueError("Student_Name and University_ID cannot be empty.")
         if semester not in SEMESTERS:
-            raise ValueError(f"Invalid semester '{semester}' for {row['University_ID']}")
+            raise ValueError(f"Invalid semester '{semester}' for {uid}")
+        # CSV upload is restricted to an already registered student.
+        registered = find_registered_student(uid)
+        if not registered:
+            raise ValueError(f"University ID '{uid}' is not registered by a tutor.")
+        if str(registered.get("Student_Name", "")).strip().casefold() != name.casefold():
+            raise ValueError(f"Student name does not match registered University ID '{uid}'.")
+        if str(registered.get("Department", "")).strip() != str(tutor_department).strip():
+            raise ValueError(f"University ID '{uid}' is outside your assigned department.")
+        if str(registered.get("Semester", "")).strip().upper() != semester:
+            raise ValueError(f"University ID '{uid}' is registered for {registered.get('Semester')}, not {semester}.")
+
         subjects = get_subjects(tutor_department, semester)
+        if len(subjects) != 6:
+            raise ValueError(f"Exactly 6 subjects are required for {tutor_department} — {semester}.")
         values = []
         for i, default_subject in enumerate(subjects, 1):
-            sub = str(row.get(f"Subject_{i}", default_subject)).strip() or default_subject
             item = normalize_subject({
-                "Subject": sub,
+                "Subject": default_subject,
                 "Attendance": row.get(f"Attendance_{i}", 0),
                 "Study_Hours": 0,
                 "Internal": row.get(f"Internal_{i}", 0),
@@ -1223,7 +1240,7 @@ def uploaded_to_reports(uploaded_file, tutor_department):
                 "Previous": row.get(f"Previous_{i}", 0),
             })
             values.append(item)
-        reports.append(make_report(row["Username"], row["Student_Name"], row["University_ID"], semester, tutor_department, values))
+        reports.append(make_report(uid, name, uid, semester, tutor_department, values))
     return reports
 
 # ============================================================
@@ -1745,7 +1762,7 @@ def teacher_dashboard():
                     if not reg:
                         rejected.append(str(report.get("University_ID", "")))
                         continue
-                    if str(reg.get("Username", "")).strip().lower() != str(report.get("Username", "")).strip().lower() or str(reg.get("Student_Name", "")).strip().lower() != str(report.get("Student_Name", "")).strip().lower():
+                    if str(reg.get("Student_Name", "")).strip().casefold() != str(report.get("Student_Name", "")).strip().casefold():
                         rejected.append(str(report.get("University_ID", "")))
                         continue
                     valid_reports.append(report)
@@ -2074,6 +2091,7 @@ def find_registered_student(uid):
             "Semester": r.get("semester", ""),
             "Tutor_Username": r.get("registered_by", ""),
             "Registered_Time": r.get("registered_at", ""),
+            "Studied_College": r.get("studied_college", ""),
         }
     except Exception as exc:
         st.error(f"❌ Supabase student lookup failed: {exc}")
