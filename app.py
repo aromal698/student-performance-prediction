@@ -15,6 +15,12 @@ from reportlab.lib import colors
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak
 
 try:
+    from supabase import create_client
+    SUPABASE_AVAILABLE = True
+except Exception:
+    SUPABASE_AVAILABLE = False
+
+try:
     from PIL import Image, ImageDraw, ImageFont
     PIL_AVAILABLE = True
 except Exception:
@@ -316,6 +322,102 @@ def save_reports(df):
     df.to_csv(REPORT_FILE, index=False)
 
 
+def _supabase_secret(*names):
+    for name in names:
+        try:
+            value = st.secrets.get(name, "")
+        except Exception:
+            value = ""
+        if value:
+            return str(value).strip()
+    return ""
+
+
+def _get_shared_supabase():
+    if not SUPABASE_AVAILABLE:
+        return None
+    url = _supabase_secret("SUPABASE_URL", "SUPABASE_PROJECT_URL").rstrip("/")
+    key = _supabase_secret("SUPABASE_KEY", "SUPABASE_SECRET_KEY", "SUPABASE_SERVICE_ROLE_KEY")
+    if url.endswith("/rest/v1"):
+        url = url[:-8]
+    if not url or not key:
+        return None
+    return create_client(url, key)
+
+
+def sync_student_to_supabase(report):
+    try:
+        sb = _get_shared_supabase()
+        if sb is None:
+            return
+        sb.table("students").upsert({
+            "university_id": str(report.get("University_ID", "")).strip(),
+            "student_name": str(report.get("Student_Name", "")).strip(),
+            "department": str(report.get("Department", "")).strip(),
+            "semester": str(report.get("Semester", "")).strip().upper(),
+            "studied_college": "",
+            "registered_by": str(report.get("Username", "")).strip(),
+            "active": True,
+        }, on_conflict="university_id").execute()
+    except Exception:
+        pass
+
+
+def sync_marks_to_supabase(report):
+    try:
+        sb = _get_shared_supabase()
+        if sb is None:
+            return
+        uid = str(report.get("University_ID", "")).strip()
+        subjects = parse_subjects(report.get("Subjects_JSON", "[]"))
+        tutor_name = str(st.session_state.get("username", "")).strip()
+        sb.table("student_marks").delete().eq("university_id", uid).execute()
+        sb.table("student_marks").insert({
+            "university_id": uid,
+            "department": str(report.get("Department", "")).strip(),
+            "semester": str(report.get("Semester", "")).strip().upper(),
+            "tutor_name": tutor_name,
+            "subjects": subjects,
+        }).execute()
+    except Exception:
+        pass
+
+
+def sync_tutor_profile_to_supabase(username, tutor_name, department, credit_score):
+    try:
+        sb = _get_shared_supabase()
+        if sb is None:
+            return
+        sb.table("tutors").upsert({
+            "tutor_id": str(username).strip(),
+            "tutor_name": str(tutor_name).strip(),
+            "department": str(department).strip(),
+            "semester": "",
+            "credit_score": float(credit_score or 0),
+            "active": True,
+        }, on_conflict="tutor_id").execute()
+    except Exception:
+        pass
+
+
+def sync_audit_to_supabase(action, role, username, uid, department, semester, details):
+    try:
+        sb = _get_shared_supabase()
+        if sb is None:
+            return
+        sb.table("audit_logs").insert({
+            "username": str(username or "").strip(),
+            "role": str(role or "").strip(),
+            "action": str(action or "").strip(),
+            "university_id": str(uid or "").strip(),
+            "department": str(department or "").strip(),
+            "semester": str(semester or "").strip().upper(),
+            "details": str(details or "").strip(),
+        }).execute()
+    except Exception:
+        pass
+
+
 def upsert_report(report):
     df = load_reports()
     if df.empty:
@@ -328,6 +430,8 @@ def upsert_report(report):
         df = df.loc[~mask].copy()
         df = pd.concat([df, pd.DataFrame([report])], ignore_index=True)
     save_reports(df)
+    sync_student_to_supabase(report)
+    sync_marks_to_supabase(report)
 
 
 def delete_student(uid, department):
@@ -404,6 +508,16 @@ def register_student(name, uid, department, semester, tutor_username):
     else:
         df = pd.concat([df, pd.DataFrame([row])], ignore_index=True)
     save_registrations(df)
+    try:
+        sb = _get_shared_supabase()
+        if sb is not None:
+            sb.table("students").upsert({
+                "university_id": uid, "student_name": name.strip(),
+                "department": department, "semester": str(semester).upper(),
+                "studied_college": "", "registered_by": tutor_username, "active": True
+            }, on_conflict="university_id").execute()
+    except Exception:
+        pass
     return row
 
 
@@ -426,6 +540,7 @@ def save_tutor_profile(username, tutor_name, department, credit_score):
     if mask.any(): df.loc[mask,list(row.keys())]=list(row.values())
     else: df=pd.concat([df,pd.DataFrame([row])],ignore_index=True)
     df.to_csv(TUTOR_PROFILE_FILE,index=False)
+    sync_tutor_profile_to_supabase(username, tutor_name, department, credit_score)
 
 def get_tutor_profile(username):
     df=load_tutor_profiles()
@@ -466,6 +581,7 @@ def audit(action, role, username="", uid="", department="", semester="", details
     }
     df = pd.concat([df, pd.DataFrame([row])], ignore_index=True)
     df.to_csv(AUDIT_FILE, index=False)
+    sync_audit_to_supabase(action, role, username, uid, department, semester, details)
 
 
 def student_file_dir(uid):
@@ -1187,6 +1303,7 @@ def tutor_mark_entry(department, semester):
             assignment = c.number_input("Assignment /15", 0.0, 15.0, float(oldx.get("Assignment",8)), 1.0, key=f"m_asg_{i}_{selected['University_ID']}")
             previous = d.number_input("Previous /60", 0.0, 60.0, float(oldx.get("Previous",30)), 1.0, key=f"m_prev_{i}_{selected['University_ID']}")
             values.append(normalize_subject({"Subject":subject,"Attendance":att,"Study_Hours":float(oldx.get("Study_Hours",0)),"Internal":internal,"Assignment":assignment,"Previous":previous}))
+        completed = st.checkbox("✅ Mark this Tutor work as COMPLETED", value=False, help="Completed work is sent to the Principal dashboard and included in tutor salary analysis.")
         submitted = st.form_submit_button("💾 Submit Marks", type="primary", use_container_width=True)
     if submitted:
         if len(subjects) != 6:
@@ -1195,7 +1312,16 @@ def tutor_mark_entry(department, semester):
         report = make_report("", selected["Student_Name"], selected["University_ID"], semester, department, values)
         upsert_report(report)
         audit("Student Mark Submission", "Tutor", st.session_state.username, selected["University_ID"], department, semester, "Marks submitted")
-        st.success(f"✅ Marks saved for {selected['Student_Name']}.")
+        if completed:
+            # Store an explicit completion event. Principal salary is based only on this event.
+            credit = float(np.mean([float(x.get("Overall", 0)) for x in values])) / 10 if values else 0.0
+            audit("Tutor Work Completed", "Tutor", st.session_state.username, selected["University_ID"], department, semester,
+                  f"Tutor work completed; Student Credit: {credit:.2f}/10; Salary eligible: Yes")
+            st.success(f"✅ {selected['Student_Name']} saved. 🟢 Tutor work marked COMPLETED and sent to Principal.")
+        else:
+            audit("Tutor Work Saved - Pending Completion", "Tutor", st.session_state.username, selected["University_ID"], department, semester,
+                  "Tutor work saved; Salary eligible: No until marked Completed")
+            st.success(f"✅ Marks saved for {selected['Student_Name']}. 🟡 Work remains Pending.")
         st.rerun()
 
 
