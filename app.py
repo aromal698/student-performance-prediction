@@ -1275,31 +1275,56 @@ def create_student_card_png(profile):
 def smart_card_page():
     app_brand()
     st.title("🪪 Student Smart Card")
-    st.caption("Submit your identity details once. Full registration data is stored for the Principal portal; the downloadable card contains only essential academic identity fields.")
+    current_year = datetime.now().year
+    min_dob = date(current_year - 100, 1, 1)
+    max_dob = datetime.now().date()
+    st.caption(
+        f"Enter your Smart Card details. DOB is available up to {current_year}; "
+        "the maximum year updates automatically every year."
+    )
     if st.session_state.get("smart_card_message"):
         st.success(st.session_state.smart_card_message)
         st.session_state.smart_card_message = ""
+
+    university_options = UNIVERSITIES
     with st.form("smart_card_registration_form", clear_on_submit=False):
-        c1,c2=st.columns(2)
+        c1, c2 = st.columns(2)
         with c1:
-            reg_id=st.text_input("Registration ID *", placeholder="e.g. REG2026CE001")
-            name=st.text_input("Student Name *")
-            dob=st.date_input("DOB *", value=None)
-            blood=st.selectbox("Blood Group *", ["A+","A-","B+","B-","AB+","AB-","O+","O-"])
-            address=st.text_area("Address *", height=90)
-            pin=st.text_input("PIN Code *", max_chars=6)
+            reg_id = st.text_input("Registration ID *", placeholder=f"e.g. REG{current_year}CE001")
+            name = st.text_input("Student Name *")
+            dob = st.date_input(
+                "Date of Birth (DOB) *",
+                value=date(2007, 1, 1),
+                min_value=min_dob,
+                max_value=max_dob,
+                format="DD/MM/YYYY",
+                help=f"DOB year range: {current_year - 100}–{current_year}. This automatically moves forward each year."
+            )
+            blood = st.selectbox("Blood Group *", ["A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"])
+            address = st.text_area("Address *", height=90)
+            pin = st.text_input("PIN Code *", max_chars=6)
         with c2:
-            college=st.text_input("Studied College *")
-            department=st.selectbox("Department *", DEPARTMENTS)
-            semester=st.selectbox("Semester *", SEMESTERS)
-            cgpa=st.number_input("CGPA (optional)", min_value=0.0, max_value=10.0, value=0.0, step=0.01)
-            university=st.text_input("University Name *", value="APJ Abdul Kalam Technological University")
-            uid=st.text_input("University ID (optional)")
-        submitted=st.form_submit_button("🪪 Submit & Generate Smart Card", type="primary", use_container_width=True)
+            college = st.text_input("Studied College *")
+            department = st.selectbox("Department *", DEPARTMENTS)
+            semester = st.selectbox("Semester *", SEMESTERS)
+            cgpa = st.number_input("CGPA (optional)", min_value=0.0, max_value=10.0, value=0.0, step=0.01)
+            university = st.selectbox("University Name *", university_options)
+            if university == "Other / Not Listed":
+                university_other = st.text_input("Enter University Name *", placeholder="Type your university name")
+            else:
+                university_other = ""
+            uid = st.text_input("University ID (optional)")
+
+        submitted = st.form_submit_button("🪪 Submit & Generate Smart Card", type="primary", use_container_width=True)
+
     if submitted:
-        required=[reg_id,name,address,pin,college,department,semester,university]
+        final_university = university_other.strip() if university == "Other / Not Listed" else university.strip()
+        required = [reg_id, name, address, pin, college, department, semester, final_university]
         if not all(str(x).strip() for x in required):
             st.error("Please fill all required (*) fields.")
+            return
+        if dob > max_dob:
+            st.error(f"Date of Birth cannot be after {max_dob.strftime('%d/%m/%Y')}.")
             return
         if not re.fullmatch(r"\d{6}", pin.strip()):
             st.error("PIN Code must contain exactly 6 digits.")
@@ -1307,28 +1332,59 @@ def smart_card_page():
         if not re.fullmatch(r"[A-Za-z0-9_-]{4,30}", reg_id.strip()):
             st.error("Registration ID must be 4–30 characters using letters, numbers, _ or - only.")
             return
-        row={"Registration_ID":reg_id.strip(),"Student_Name":name.strip(),"DOB":str(dob),"Blood_Group":blood,"Address":address.strip(),"PIN_Code":pin.strip(),"Studied_College":college.strip(),"Department":department,"Semester":semester,"CGPA":f"{cgpa:.2f}" if cgpa else "","University_Name":university.strip(),"University_ID":uid.strip(),"Submitted_Time":datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
+
+        row = {
+            "Registration_ID": reg_id.strip(),
+            "Student_Name": name.strip(),
+            "DOB": dob.strftime("%Y-%m-%d"),
+            "Blood_Group": blood,
+            "Address": address.strip(),
+            "PIN_Code": pin.strip(),
+            "Studied_College": college.strip(),
+            "Department": department,
+            "Semester": semester,
+            "CGPA": f"{cgpa:.2f}" if cgpa else "",
+            "University_Name": final_university,
+            "University_ID": uid.strip(),
+            "Submitted_Time": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        }
         save_smart_card(row)
         try:
-            img=create_student_card_png(row)
-            path=os.path.join(SMART_CARD_DIR,f"{re.sub(r'[^A-Za-z0-9_-]','_',reg_id.strip())}.png")
-            img.save(path,"PNG")
+            img = create_student_card_png(row)
+            safe_reg = re.sub(r"[^A-Za-z0-9_-]", "_", reg_id.strip())
+            path = os.path.join(SMART_CARD_DIR, f"{safe_reg}.png")
+            img.save(path, "PNG")
             import io as _io
-            buf=_io.BytesIO(); img.save(buf,"PNG")
-            st.session_state.smart_card_preview=buf.getvalue()
-            st.session_state.smart_card_message="Smart Card registered successfully. Full details are available in the Principal portal."
+            buf = _io.BytesIO()
+            img.save(buf, "PNG")
+            st.session_state.smart_card_preview = buf.getvalue()
+            st.session_state.smart_card_message = (
+                "Smart Card registered successfully. Full details are available in the Principal portal."
+            )
             st.rerun()
         except Exception as e:
             st.error(f"Smart Card generation error: {e}")
+
     if st.session_state.get("smart_card_preview"):
         st.subheader("Smart Card Preview")
         st.image(st.session_state.smart_card_preview, use_container_width=True)
+
         def clear_card_preview():
-            st.session_state.smart_card_preview=None
-            st.session_state.smart_card_message="Smart Card downloaded successfully. Preview removed."
-        st.download_button("📥 Download Smart Card PNG", data=st.session_state.smart_card_preview, file_name="Student_Smart_Card.png", mime="image/png", use_container_width=True, on_click=clear_card_preview)
+            st.session_state.smart_card_preview = None
+            st.session_state.smart_card_message = "Smart Card downloaded successfully. Preview removed."
+
+        st.download_button(
+            "📥 Download Smart Card PNG",
+            data=st.session_state.smart_card_preview,
+            file_name="Student_Smart_Card.png",
+            mime="image/png",
+            use_container_width=True,
+            on_click=clear_card_preview
+        )
+
     if st.button("⬅️ Back", use_container_width=True):
-        st.session_state.page="home"; st.rerun()
+        st.session_state.page = "home"
+        st.rerun()
 
 # ============================================================
 # LOGIN / PAGES
