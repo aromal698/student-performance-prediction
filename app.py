@@ -268,9 +268,15 @@ def inject_css():
     .good-pop,.sad-pop {{ padding:25px;border-radius:24px;text-align:center;animation:pop .55s ease-out; }}
     .good-pop {{ background:linear-gradient(135deg,rgba(34,197,94,.20),rgba(16,185,129,.08));border:1px solid rgba(74,222,128,.45); }}
     .sad-pop {{ background:linear-gradient(135deg,rgba(239,68,68,.18),rgba(127,29,29,.08));border:1px solid rgba(248,113,113,.42); }}
-    .smart-card {{ width:min(500px,100%); margin:12px auto; padding:20px; border-radius:20px; background:linear-gradient(135deg,#06142e,#0b4aa2,#123f8f); border:1px solid rgba(255,255,255,.18); box-shadow:0 22px 60px rgba(0,0,0,.35); }}
-    .smart-card .small {{ color:#cbd5e1; font-size:.72rem; letter-spacing:.12em; text-transform:uppercase; }}
-    .smart-card .name {{ font-size:1.75rem; font-weight:800; margin:10px 0 4px; }} .smart-card .uid {{ font-family:monospace; font-size:1.15rem; letter-spacing:.08em; }}
+    .smart-card {{ width:min(680px,100%); margin:18px auto; padding:28px; border-radius:26px; background:linear-gradient(135deg,#062a6b 0%,#0b63ce 38%,#12a4d8 72%,#083b8f 100%); border:2px solid rgba(255,255,255,.35); box-shadow:0 28px 80px rgba(0,0,0,.42); position:relative; overflow:hidden; }}
+    .smart-card:before {{ content:""; position:absolute; inset:-30%; background:radial-gradient(circle,rgba(255,255,255,.18),transparent 35%); animation:cardshine 7s linear infinite; pointer-events:none; }}
+    .smart-card .small {{ position:relative; color:#e0f2fe; font-size:.92rem; font-weight:800; letter-spacing:.16em; text-transform:uppercase; }}
+    .smart-card .name {{ position:relative; font-size:2.35rem; font-weight:900; margin:12px 0 5px; color:#fff; text-shadow:0 2px 10px rgba(0,0,0,.25); }}
+    .smart-card .uid {{ position:relative; font-family:monospace; font-size:1.35rem; font-weight:800; letter-spacing:.10em; color:#fff; }}
+    .smart-card .detail-grid {{ position:relative; display:grid; grid-template-columns:1fr 1fr; gap:9px 22px; margin-top:20px; font-size:1.02rem; line-height:1.45; color:#f0f9ff; }}
+    .smart-card .label {{ color:#bae6fd; font-size:.78rem; font-weight:800; text-transform:uppercase; letter-spacing:.06em; }}
+    .smart-card .value {{ color:#fff; font-weight:700; word-break:break-word; }}
+    @keyframes cardshine {{ from{{transform:translate3d(-25%,-10%,0) rotate(0deg)}} to{{transform:translate3d(25%,10%,0) rotate(360deg)}} }}
     @keyframes pop {{ from{{transform:scale(.82);opacity:0}} to{{transform:scale(1);opacity:1}} }}
     @media (prefers-reduced-motion: reduce) {{ .stApp::before,.stApp::after,.login-grid,.login-orb,.login-main-emoji,.dynamic-3d-wallpaper * {{ animation:none !important; }} }}
     </style>
@@ -557,11 +563,25 @@ def get_tutor_credit_score(username): return float(get_tutor_profile(username).g
 def load_smart_card_registrations(): return _load_generic_csv(SMART_CARD_FILE,SMART_CARD_COLUMNS)
 
 def save_smart_card_registration(data):
-    df=load_smart_card_registrations(); row={c:data.get(c,"") for c in SMART_CARD_COLUMNS}; row["Submitted_Time"]=datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    mask=df["University_ID"].astype(str).str.lower().eq(str(row["University_ID"]).lower())
-    if mask.any(): df.loc[mask,list(row.keys())]=list(row.values())
-    else: df=pd.concat([df,pd.DataFrame([row])],ignore_index=True)
+    """Save Smart Card locally and to Supabase without hiding sync errors."""
+    df=load_smart_card_registrations()
+    row={c:data.get(c,"") for c in SMART_CARD_COLUMNS}
+    row["Registration_ID"]=str(row.get("Registration_ID","")).strip()
+    row["University_ID"]=str(row.get("University_ID","")).strip()
+    row["Student_Name"]=str(row.get("Student_Name","")).strip()
+    row["CGPA"]=str(row.get("CGPA","")).strip()
+    row["Submitted_Time"]=datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    if not row["Registration_ID"]:
+        row["Registration_ID"]=row["University_ID"]
+    # Update by University ID so one student always has one current card.
+    mask=df["University_ID"].astype(str).str.lower().eq(row["University_ID"].lower())
+    if mask.any():
+        df.loc[mask,list(row.keys())]=list(row.values())
+    else:
+        df=pd.concat([df,pd.DataFrame([row])],ignore_index=True)
     df.to_csv(SMART_CARD_FILE,index=False)
+
+    sb_error=None
     try:
         sb=_get_shared_supabase()
         if sb is not None:
@@ -570,12 +590,14 @@ def save_smart_card_registration(data):
                 "name": row["Student_Name"], "dob": row["DOB"] or None, "blood_group": row["Blood_Group"],
                 "address": row["Address"], "pin_code": row["PIN_Code"], "studied_college": row["Studied_College"],
                 "department": row["Department"], "semester": row["Semester"],
-                "cgpa": float(row["CGPA"]) if str(row["CGPA"]).strip() else None,
+                "cgpa": float(row["CGPA"]) if row["CGPA"] else None,
                 "university_name": row["University_Name"]
             }
             sb.table("smart_cards").upsert(payload, on_conflict="registration_id").execute()
-    except Exception:
-        pass
+    except Exception as exc:
+        sb_error=str(exc)
+    if sb_error:
+        st.warning("Smart Card was saved on this app, but cloud sync failed. Principal may not see the new card until Supabase is fixed: " + sb_error)
     return row
 
 def find_smart_card_registration(uid):
@@ -1194,32 +1216,69 @@ def student_login():
 
 
 def smart_card_page():
-    app_brand(); st.title("🪪 Student Smart Card Registration"); st.caption("Submit smart-card details. The Principal portal can view the submitted registration details.")
+    app_brand(); st.title("🪪 Student Smart Card Registration")
+    st.caption("Colorful student identity card • large readable text • full details • visible to the student and Principal")
     uid=st.session_state.get("student_report",{}).get("University_ID","")
     if not uid: uid=st.text_input("University ID",placeholder="e.g. SNM25CE001")
     reg=find_registration(uid) if uid else None
+    if not reg and uid:
+        try:
+            sb=_get_shared_supabase()
+            if sb is not None:
+                cloud=sb.table("students").select("*").eq("university_id",uid.strip()).limit(1).execute().data or []
+                if cloud:
+                    r=cloud[0]; reg={"University_ID":r.get("university_id",""),"Student_Name":r.get("student_name",""),"Department":r.get("department",""),"Semester":r.get("semester","")}
+        except Exception:
+            pass
     if not reg:
-        st.warning("Register with a tutor first, then open Smart Card Registration.")
+        st.warning("Student profile was not found. Use the Student Profile Lookup with University ID + Student Name first, or register with a Tutor.")
         if st.button("← Back to Home"): st.session_state.page="home"; st.rerun()
         return
-    existing=find_smart_card_registration(uid); groups=["A+","A-","B+","B-","AB+","AB-","O+","O-"]
+    existing=find_smart_card_registration(uid)
+    groups=["A+","A-","B+","B-","AB+","AB-","O+","O-"]
     with st.form("smart_card_registration_form"):
-        c1,c2=st.columns(2); registration_id=c1.text_input("Registration ID *",value=str(existing.get("Registration_ID","")) if existing else ""); name=c2.text_input("Name *",value=str(existing.get("Student_Name",reg.get("Student_Name",""))) if existing else str(reg.get("Student_Name","")))
-        c1,c2=st.columns(2); dob=c1.date_input("DOB *",value=datetime.strptime(existing["DOB"],"%Y-%m-%d").date() if existing and str(existing.get("DOB","")) else datetime(2007,1,1).date()); blood=c2.selectbox("Blood Group *",groups,index=groups.index(existing.get("Blood_Group")) if existing and existing.get("Blood_Group") in groups else 0)
-        address=st.text_area("Address *",value=str(existing.get("Address","")) if existing else "")
-        c1,c2=st.columns(2); pin=c1.text_input("PIN Code *",value=str(existing.get("PIN_Code","")) if existing else ""); college=c2.text_input("Studied College *",value=str(existing.get("Studied_College","")) if existing else "")
-        c1,c2=st.columns(2); department=c1.text_input("Department",value=str(reg.get("Department","")),disabled=True); semester=c2.text_input("Semester",value=str(reg.get("Semester","")),disabled=True)
-        c1,c2=st.columns(2); cgpa=c1.text_input("CGPA (optional)",value=str(existing.get("CGPA","")) if existing else ""); university=c2.text_input("University Name *",value=str(existing.get("University_Name","")) if existing else "")
-        submit=st.form_submit_button("💾 Submit Smart Card Registration",type="primary",use_container_width=True)
+        c1,c2=st.columns(2)
+        registration_id=c1.text_input("Registration ID *",value=str(existing.get("Registration_ID",uid)) if existing else str(uid))
+        name=c2.text_input("Name *",value=str(existing.get("Student_Name",reg.get("Student_Name",""))) if existing else str(reg.get("Student_Name","")))
+        c1,c2=st.columns(2)
+        try: dob_default=datetime.strptime(str(existing.get("DOB")),"%Y-%m-%d").date() if existing and str(existing.get("DOB","")) else datetime(2007,1,1).date()
+        except Exception: dob_default=datetime(2007,1,1).date()
+        dob=c1.date_input("DOB *",value=dob_default)
+        blood=c2.selectbox("Blood Group *",groups,index=groups.index(existing.get("Blood_Group")) if existing and existing.get("Blood_Group") in groups else 0)
+        address=st.text_area("Full Address *",value=str(existing.get("Address","")) if existing else "",height=90)
+        c1,c2=st.columns(2)
+        pin=c1.text_input("PIN Code *",value=str(existing.get("PIN_Code","")) if existing else "")
+        college=c2.text_input("Studied College *",value=str(existing.get("Studied_College","")) if existing else "")
+        c1,c2=st.columns(2)
+        department=c1.text_input("Department",value=str(reg.get("Department",""),),disabled=True)
+        semester=c2.text_input("Semester",value=str(reg.get("Semester","")),disabled=True)
+        c1,c2=st.columns(2)
+        cgpa=c1.text_input("CGPA (optional)",value=str(existing.get("CGPA","")) if existing else "")
+        university=c2.text_input("University Name *",value=str(existing.get("University_Name","")) if existing else "APJ Abdul Kalam Technological University")
+        submit=st.form_submit_button("💾 Save / Update Smart Card",type="primary",use_container_width=True)
     if submit:
-        if not all([registration_id.strip(),name.strip(),address.strip(),pin.strip(),college.strip(),university.strip()]): st.error("Please fill all required fields marked *."); return
-        data={"Registration_ID":registration_id.strip(),"University_ID":uid,"Student_Name":name.strip(),"DOB":dob.strftime("%Y-%m-%d"),"Blood_Group":blood,"Address":address.strip(),"PIN_Code":pin.strip(),"Studied_College":college.strip(),"Department":department,"Semester":semester,"CGPA":cgpa.strip(),"University_Name":university.strip()}
-        row=save_smart_card_registration(data); st.session_state.smart_card_registration=row; st.session_state.smart_card_hidden=False; audit("Smart Card Registration","Student","",uid,department,semester,"Smart card details submitted"); st.success("✅ Smart card registration submitted.")
+        if not all([registration_id.strip(),name.strip(),address.strip(),pin.strip(),college.strip(),university.strip()]):
+            st.error("Please fill all required fields marked *."); return
+        if cgpa.strip():
+            try:
+                if not 0 <= float(cgpa.strip()) <= 10: raise ValueError
+            except Exception:
+                st.error("CGPA must be a number from 0 to 10."); return
+        data={"Registration_ID":registration_id.strip(),"University_ID":uid.strip(),"Student_Name":name.strip(),"DOB":dob.strftime("%Y-%m-%d"),"Blood_Group":blood,"Address":address.strip(),"PIN_Code":pin.strip(),"Studied_College":college.strip(),"Department":department,"Semester":semester,"CGPA":cgpa.strip(),"University_Name":university.strip()}
+        row=save_smart_card_registration(data)
+        st.session_state.smart_card_registration=row; st.session_state.smart_card_hidden=False
+        audit("Smart Card Registration","Student","",uid,department,semester,"Full smart card details submitted/updated")
+        st.success("✅ Smart Card saved successfully. Your full card is shown below.")
     card_data=st.session_state.get("smart_card_registration") or existing
     if card_data and not st.session_state.get("smart_card_hidden",False):
-        st.markdown(f"<div class='smart-card'><div class='small'>EduPredict SPP • STUDENT SMART CARD</div><div class='name'>{card_data.get('Student_Name','')}</div><div class='uid'>{card_data.get('Registration_ID','')}</div><div style='margin-top:18px;color:#dbeafe'>{card_data.get('Department','')} • {card_data.get('Semester','')}<br>University ID: {card_data.get('University_ID','')}<br>DOB: {card_data.get('DOB','')} • Blood: {card_data.get('Blood_Group','')}</div></div>",unsafe_allow_html=True)
+        details=[("DOB",card_data.get("DOB","")),("Blood Group",card_data.get("Blood_Group","")),("University ID",card_data.get("University_ID","")),("PIN Code",card_data.get("PIN_Code","")),("Department",card_data.get("Department","")),("Semester",card_data.get("Semester","")),("Studied College",card_data.get("Studied_College","")),("University",card_data.get("University_Name","")),("CGPA",card_data.get("CGPA","") or "—"),("Address",card_data.get("Address",""))]
+        html=f"<div class='smart-card'><div class='small'>EduPredict SPP • Student Identity Card</div><div class='name'>{card_data.get('Student_Name','')}</div><div class='uid'>{card_data.get('Registration_ID','')}</div><div class='detail-grid'>"
+        for label,val in details:
+            html += f"<div><div class='label'>{label}</div><div class='value'>{str(val)}</div></div>"
+        html += "</div></div>"
+        st.markdown(html,unsafe_allow_html=True)
         card=create_student_card_png(card_data)
-        if card: st.download_button("📥 Download Smart Card PNG",card,f"{uid}_Smart_Card.png","image/png",type="primary",use_container_width=True,on_click=hide_smart_card); st.caption("The card preview is removed after download for privacy.")
+        if card: st.download_button("📥 Download Full Smart Card PNG",card,f"{uid}_Smart_Card.png","image/png",type="primary",use_container_width=True)
     if st.button("← Back to Student Dashboard" if st.session_state.get("logged_in") else "← Back to Home"):
         st.session_state.page="student_dashboard" if st.session_state.get("logged_in") and st.session_state.get("role")=="student" else "home"; st.rerun()
 
