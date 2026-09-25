@@ -48,6 +48,7 @@ os.makedirs(DATA_DIR, exist_ok=True)
 REPORT_FILE = os.path.join(DATA_DIR, "student_reports.csv")
 REGISTRATION_FILE = os.path.join(DATA_DIR, "student_registrations.csv")
 TUTOR_PROFILE_FILE = os.path.join(DATA_DIR, "tutor_profiles.csv")
+SMART_CARD_FILE = os.path.join(DATA_DIR, "smart_card_registrations.csv")
 AUDIT_FILE = os.path.join(DATA_DIR, "audit_log.csv")
 STUDENT_FILES_DIR = os.path.join(DATA_DIR, "student_files")
 os.makedirs(STUDENT_FILES_DIR, exist_ok=True)
@@ -174,7 +175,8 @@ REPORT_COLUMNS = [
     "Subjects_JSON", "Created_Time"
 ]
 REGISTRATION_COLUMNS = ["University_ID", "Student_Name", "Department", "Semester", "Tutor_Username", "Registered_Time"]
-TUTOR_PROFILE_COLUMNS = ["Tutor_Username", "Department", "Credit_Score", "Updated_Time"]
+TUTOR_PROFILE_COLUMNS = ["Tutor_Username", "Tutor_Name", "Department", "Credit_Score", "Updated_Time"]
+SMART_CARD_COLUMNS = ["Registration_ID", "University_ID", "Student_Name", "DOB", "Blood_Group", "Address", "PIN_Code", "Studied_College", "Department", "Semester", "CGPA", "University_Name", "Submitted_Time"]
 AUDIT_COLUMNS = ["Timestamp", "Role", "Username", "Action", "University_ID", "Department", "Semester", "Details"]
 
 # ============================================================
@@ -185,6 +187,8 @@ DEFAULT_STATE = {
     "teacher_department": None, "student_report": None,
     "dashboard_view": "department",
     "student_registration": None,
+    "smart_card_registration": None,
+    "smart_card_hidden": False,
 }
 for key, value in DEFAULT_STATE.items():
     if key not in st.session_state:
@@ -391,34 +395,42 @@ def load_tutor_profiles():
     return _load_generic_csv(TUTOR_PROFILE_FILE, TUTOR_PROFILE_COLUMNS)
 
 
-def save_tutor_profile(username, department, credit_score):
-    df = load_tutor_profiles()
-    row = {
-        "Tutor_Username": username,
-        "Department": department,
-        "Credit_Score": float(credit_score),
-        "Updated_Time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-    }
-    mask = df["Tutor_Username"].astype(str).eq(username)
-    if mask.any():
-        df.loc[mask, list(row.keys())] = list(row.values())
-    else:
-        df = pd.concat([df, pd.DataFrame([row])], ignore_index=True)
-    df.to_csv(TUTOR_PROFILE_FILE, index=False)
+def save_tutor_profile(username, tutor_name, department, credit_score):
+    df=load_tutor_profiles()
+    row={"Tutor_Username":username,"Tutor_Name":tutor_name.strip(),"Department":department,"Credit_Score":float(credit_score),"Updated_Time":datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
+    mask=df["Tutor_Username"].astype(str).eq(username)
+    if mask.any(): df.loc[mask,list(row.keys())]=list(row.values())
+    else: df=pd.concat([df,pd.DataFrame([row])],ignore_index=True)
+    df.to_csv(TUTOR_PROFILE_FILE,index=False)
 
+def get_tutor_profile(username):
+    df=load_tutor_profiles()
+    if df.empty: return {"Tutor_Username":username,"Tutor_Name":"","Department":"","Credit_Score":0.0}
+    x=df[df["Tutor_Username"].astype(str).eq(str(username))]
+    if x.empty: return {"Tutor_Username":username,"Tutor_Name":"","Department":"","Credit_Score":0.0}
+    r=x.iloc[0].to_dict()
+    try:r["Credit_Score"]=float(r.get("Credit_Score",0))
+    except:r["Credit_Score"]=0.0
+    return r
 
-def get_tutor_credit_score(username):
-    df = load_tutor_profiles()
-    if df.empty:
-        return 0.0
-    x = df[df["Tutor_Username"].astype(str).eq(str(username))]
-    if x.empty:
-        return 0.0
-    try:
-        return float(x.iloc[0]["Credit_Score"])
-    except Exception:
-        return 0.0
+def get_tutor_credit_score(username): return float(get_tutor_profile(username).get("Credit_Score",0.0))
 
+def load_smart_card_registrations(): return _load_generic_csv(SMART_CARD_FILE,SMART_CARD_COLUMNS)
+
+def save_smart_card_registration(data):
+    df=load_smart_card_registrations(); row={c:data.get(c,"") for c in SMART_CARD_COLUMNS}; row["Submitted_Time"]=datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    mask=df["University_ID"].astype(str).str.lower().eq(str(row["University_ID"]).lower())
+    if mask.any(): df.loc[mask,list(row.keys())]=list(row.values())
+    else: df=pd.concat([df,pd.DataFrame([row])],ignore_index=True)
+    df.to_csv(SMART_CARD_FILE,index=False); return row
+
+def find_smart_card_registration(uid):
+    df=load_smart_card_registrations()
+    if df.empty:return None
+    x=df[df["University_ID"].astype(str).str.lower().eq(str(uid).strip().lower())]
+    return x.iloc[0].to_dict() if not x.empty else None
+
+def hide_smart_card(): st.session_state.smart_card_hidden=True
 
 def audit(action, role, username="", uid="", department="", semester="", details=""):
     df = _load_generic_csv(AUDIT_FILE, AUDIT_COLUMNS)
@@ -456,36 +468,26 @@ def get_student_files(uid):
 
 
 def create_student_card_png(student, output_format="PNG"):
-    if not PIL_AVAILABLE:
-        return None
-    width, height = 1000, 620
-    img = Image.new("RGB", (width, height), (15, 23, 42))
-    draw = ImageDraw.Draw(img)
-    # Simple ATM-style smart card: clean main elements only.
-    draw.rounded_rectangle((25, 25, width-25, height-25), radius=38, fill=(30, 64, 175), outline=(125, 211, 252), width=4)
-    draw.rounded_rectangle((55, 55, width-55, height-55), radius=30, fill=(15, 23, 42), outline=(99, 102, 241), width=2)
+    if not PIL_AVAILABLE:return None
+    width,height=1000,630; img=Image.new("RGB",(width,height),(16,24,39)); draw=ImageDraw.Draw(img)
+    draw.rounded_rectangle((18,18,width-18,height-18),radius=42,fill=(23,70,120),outline=(148,197,253),width=3)
+    draw.rounded_rectangle((38,38,width-38,height-38),radius=34,fill=(12,31,55),outline=(66,153,225),width=2)
     try:
-        bold = ImageFont.truetype("DejaVuSans-Bold.ttf", 42)
-        name_font = ImageFont.truetype("DejaVuSans-Bold.ttf", 34)
-        normal = ImageFont.truetype("DejaVuSans.ttf", 24)
-        uid_font = ImageFont.truetype("DejaVuSansMono.ttf", 28)
-    except Exception:
-        bold = name_font = normal = uid_font = ImageFont.load_default()
-    draw.text((85, 82), "EduPredict SPP", font=bold, fill="white")
-    draw.text((85, 145), "STUDENT SMART CARD", font=normal, fill=(191, 219, 254))
-    draw.text((85, 220), str(student.get("Student_Name", "Student"))[:30], font=name_font, fill="white")
-    draw.text((85, 275), str(student.get("University_ID", "")), font=uid_font, fill=(224, 242, 254))
-    draw.text((85, 340), f"{student.get('Department','')}", font=normal, fill=(203, 213, 225))
-    draw.text((85, 380), f"Semester: {student.get('Semester','')}", font=normal, fill=(203, 213, 225))
-    draw.text((85, 450), "KTU B.Tech", font=normal, fill=(165, 243, 252))
-    initials = "".join([x[:1] for x in str(student.get("Student_Name", "S")).split()][:2]).upper() or "S"
-    draw.ellipse((790, 180, 910, 300), fill=(51, 65, 85), outline=(125, 211, 252), width=3)
-    bbox = draw.textbbox((0,0), initials, font=bold)
-    draw.text((850-(bbox[2]-bbox[0])/2, 240-(bbox[3]-bbox[1])/2), initials, font=bold, fill="white")
-    buf = io.BytesIO()
-    img.save(buf, format=output_format)
-    buf.seek(0)
-    return buf.getvalue()
+        brand=ImageFont.truetype("DejaVuSans-Bold.ttf",30); title=ImageFont.truetype("DejaVuSans.ttf",19); namef=ImageFont.truetype("DejaVuSans-Bold.ttf",31); uidf=ImageFont.truetype("DejaVuSansMono.ttf",25); normal=ImageFont.truetype("DejaVuSans.ttf",18); small=ImageFont.truetype("DejaVuSans.ttf",15)
+    except Exception: brand=title=namef=uidf=normal=small=ImageFont.load_default()
+    draw.text((72,70),"EduPredict SPP",font=brand,fill="white"); draw.text((72,112),"STUDENT SMART CARD  •  KTU B.Tech",font=title,fill=(174,214,247))
+    draw.rounded_rectangle((72,160,178,232),radius=10,fill=(194,173,83),outline=(245,225,145),width=2)
+    for yy in (178,202): draw.line((84,yy,166,yy),fill=(105,92,48),width=2)
+    draw.text((205,165),str(student.get("Student_Name","Student"))[:30],font=namef,fill="white"); draw.text((205,207),str(student.get("Registration_ID",student.get("University_ID","")))[:24],font=uidf,fill=(220,235,250))
+    left=[("DOB",student.get("DOB","")),("Blood Group",student.get("Blood_Group","")),("Department",student.get("Department","")),("Semester",student.get("Semester","")),("College",student.get("Studied_College","")),("University",student.get("University_Name",""))]
+    right=[("University ID",student.get("University_ID","")),("PIN",student.get("PIN_Code","")),("CGPA",student.get("CGPA","") or "—")]
+    y=280
+    for label,val in left: draw.text((72,y),f"{label}: {str(val)[:42]}",font=normal,fill=(220,229,238)); y+=39
+    y=280
+    for label,val in right: draw.text((600,y),f"{label}: {str(val)[:28]}",font=normal,fill=(220,229,238)); y+=39
+    draw.text((72,520),f"Address: {str(student.get('Address',''))[:78]}",font=small,fill=(190,205,220)); draw.text((72,553),"Valid student identity card • Academic record",font=small,fill=(148,197,253))
+    initials="".join([x[:1] for x in str(student.get("Student_Name","S")).split()][:2]).upper() or "S"; draw.ellipse((870,70,930,130),fill=(42,73,105),outline=(148,197,253),width=2); bbox=draw.textbbox((0,0),initials,font=normal); draw.text((900-(bbox[2]-bbox[0])/2,100-(bbox[3]-bbox[1])/2),initials,font=normal,fill="white")
+    buf=io.BytesIO(); img.save(buf,format=output_format); buf.seek(0); return buf.getvalue()
 
 # ============================================================
 # PERFORMANCE CALCULATION
@@ -927,7 +929,7 @@ def home_page():
         st.session_state.page="teacher_login"; st.rerun()
     if b.button("🎓 Student Login",use_container_width=True):
         st.session_state.page="student_login"; st.rerun()
-    if c.button("🪪 Student Smart Card",use_container_width=True):
+    if c.button("🪪 Smart Card Registration",use_container_width=True):
         st.session_state.page="smart_card"; st.rerun()
 
 
@@ -990,30 +992,34 @@ def student_login():
 
 
 def smart_card_page():
-    app_brand()
-    st.title("🪪 Student Smart Card")
-    st.caption("Generate a small ATM-style student card from the tutor-registered profile.")
-    uid=st.text_input("University ID",placeholder="e.g. SNM25CE001")
-    if st.button("🔎 Find Student",type="primary"):
-        student=find_student("",uid)
-        if not student:
-            st.error("No registered student found.")
-            return
-        st.session_state.smart_card_student=student
-    student=st.session_state.get("smart_card_student")
-    if student:
-        st.markdown(f"""
-        <div class="smart-card">
-          <div class="small">EduPredict SPP • KTU B.Tech</div>
-          <div class="name">{student.get('Student_Name','Student')}</div>
-          <div class="uid">{student.get('University_ID','')}</div>
-          <div style="margin-top:18px;color:#cbd5e1">{student.get('Department','')}<br>Semester: {student.get('Semester','')}</div>
-        </div>
-        """,unsafe_allow_html=True)
-        card=create_student_card_png(student)
-        if card:
-            st.download_button("📥 Download PNG Student Card",card,f"{student.get('University_ID','student')}_smart_card.png","image/png",type="primary",use_container_width=True)
-        st.button("← Back to Home",on_click=lambda: st.session_state.update(page="home"))
+    app_brand(); st.title("🪪 Student Smart Card Registration"); st.caption("Submit smart-card details. The Principal portal can view the submitted registration details.")
+    uid=st.session_state.get("student_report",{}).get("University_ID","")
+    if not uid: uid=st.text_input("University ID",placeholder="e.g. SNM25CE001")
+    reg=find_registration(uid) if uid else None
+    if not reg:
+        st.warning("Register with a tutor first, then open Smart Card Registration.")
+        if st.button("← Back to Home"): st.session_state.page="home"; st.rerun()
+        return
+    existing=find_smart_card_registration(uid); groups=["A+","A-","B+","B-","AB+","AB-","O+","O-"]
+    with st.form("smart_card_registration_form"):
+        c1,c2=st.columns(2); registration_id=c1.text_input("Registration ID *",value=str(existing.get("Registration_ID","")) if existing else ""); name=c2.text_input("Name *",value=str(existing.get("Student_Name",reg.get("Student_Name",""))) if existing else str(reg.get("Student_Name","")))
+        c1,c2=st.columns(2); dob=c1.date_input("DOB *",value=datetime.strptime(existing["DOB"],"%Y-%m-%d").date() if existing and str(existing.get("DOB","")) else datetime(2007,1,1).date()); blood=c2.selectbox("Blood Group *",groups,index=groups.index(existing.get("Blood_Group")) if existing and existing.get("Blood_Group") in groups else 0)
+        address=st.text_area("Address *",value=str(existing.get("Address","")) if existing else "")
+        c1,c2=st.columns(2); pin=c1.text_input("PIN Code *",value=str(existing.get("PIN_Code","")) if existing else ""); college=c2.text_input("Studied College *",value=str(existing.get("Studied_College","")) if existing else "")
+        c1,c2=st.columns(2); department=c1.text_input("Department",value=str(reg.get("Department","")),disabled=True); semester=c2.text_input("Semester",value=str(reg.get("Semester","")),disabled=True)
+        c1,c2=st.columns(2); cgpa=c1.text_input("CGPA (optional)",value=str(existing.get("CGPA","")) if existing else ""); university=c2.text_input("University Name *",value=str(existing.get("University_Name","")) if existing else "")
+        submit=st.form_submit_button("💾 Submit Smart Card Registration",type="primary",use_container_width=True)
+    if submit:
+        if not all([registration_id.strip(),name.strip(),address.strip(),pin.strip(),college.strip(),university.strip()]): st.error("Please fill all required fields marked *."); return
+        data={"Registration_ID":registration_id.strip(),"University_ID":uid,"Student_Name":name.strip(),"DOB":dob.strftime("%Y-%m-%d"),"Blood_Group":blood,"Address":address.strip(),"PIN_Code":pin.strip(),"Studied_College":college.strip(),"Department":department,"Semester":semester,"CGPA":cgpa.strip(),"University_Name":university.strip()}
+        row=save_smart_card_registration(data); st.session_state.smart_card_registration=row; st.session_state.smart_card_hidden=False; audit("Smart Card Registration","Student","",uid,department,semester,"Smart card details submitted"); st.success("✅ Smart card registration submitted.")
+    card_data=st.session_state.get("smart_card_registration") or existing
+    if card_data and not st.session_state.get("smart_card_hidden",False):
+        st.markdown(f"<div class='smart-card'><div class='small'>EduPredict SPP • STUDENT SMART CARD</div><div class='name'>{card_data.get('Student_Name','')}</div><div class='uid'>{card_data.get('Registration_ID','')}</div><div style='margin-top:18px;color:#dbeafe'>{card_data.get('Department','')} • {card_data.get('Semester','')}<br>University ID: {card_data.get('University_ID','')}<br>DOB: {card_data.get('DOB','')} • Blood: {card_data.get('Blood_Group','')}</div></div>",unsafe_allow_html=True)
+        card=create_student_card_png(card_data)
+        if card: st.download_button("📥 Download Smart Card PNG",card,f"{uid}_Smart_Card.png","image/png",type="primary",use_container_width=True,on_click=hide_smart_card); st.caption("The card preview is removed after download for privacy.")
+    if st.button("← Back to Student Dashboard" if st.session_state.get("logged_in") else "← Back to Home"):
+        st.session_state.page="student_dashboard" if st.session_state.get("logged_in") and st.session_state.get("role")=="student" else "home"; st.rerun()
 
 # ============================================================
 # K-MEANS TUTOR ANALYSIS
@@ -1197,21 +1203,24 @@ def tutor_student_files(department, semester):
 
 
 def tutor_profile_tab():
-    st.subheader("👨‍🏫 Tutor Profile")
-    current = get_tutor_credit_score(st.session_state.username)
+    st.subheader("👨‍🏫 Tutor Profile"); profile=get_tutor_profile(st.session_state.username)
     with st.form("tutor_profile_form"):
-        score = st.number_input("Tutor Credit Score /10", 0.0, 10.0, float(current), 0.1)
-        save = st.form_submit_button("💾 Save Credit Score", type="primary")
+        tutor_name=st.text_input("Tutor Name",value=str(profile.get("Tutor_Name","")),placeholder="Enter tutor full name")
+        score=st.number_input("Tutor Credit Score /10",0.0,10.0,float(profile.get("Credit_Score",0)),0.1)
+        save=st.form_submit_button("💾 Save Tutor Details",type="primary")
     if save:
-        save_tutor_profile(st.session_state.username, st.session_state.teacher_department, score)
-        audit("Tutor Credit Score Updated", "Tutor", st.session_state.username, "", st.session_state.teacher_department, "", f"Score={score}/10")
-        st.success("✅ Tutor credit score saved.")
+        if not tutor_name.strip(): st.error("Enter tutor name."); return
+        save_tutor_profile(st.session_state.username,tutor_name,st.session_state.teacher_department,score)
+        audit("Tutor Profile Updated","Tutor",st.session_state.username,"",st.session_state.teacher_department,"",f"Tutor={tutor_name}; Credit={score}/10")
+        st.success("✅ Tutor name and credit score saved.")
 
 def teacher_dashboard():
     app_brand()
     assigned_department = st.session_state.get("teacher_department") or DEPARTMENTS[0]
     st.title("👨‍🏫 Tutor Dashboard")
-    st.info(f"Tutor department: **{assigned_department}**")
+    tutor_profile=get_tutor_profile(st.session_state.username)
+    tutor_display=tutor_profile.get("Tutor_Name") or st.session_state.username
+    st.info(f"Tutor: **{tutor_display}**  •  Department: **{assigned_department}**  •  Credit: **{float(tutor_profile.get('Credit_Score',0)):.1f}/10**")
     c1,c2,c3 = st.columns([2.2,1.0,0.8])
     department = c1.selectbox("🎓 B.Tech Department", DEPARTMENTS, index=DEPARTMENTS.index(assigned_department), key="dashboard_department")
     semester = c2.selectbox("📚 Semester", SEMESTERS, index=2, key="dashboard_semester")
@@ -1286,8 +1295,8 @@ def student_dashboard():
     st.title(f"🎓 Welcome, {profile.get('Student_Name','Student')}")
     st.caption(f"University ID: {uid}  •  {profile.get('Semester','')}  •  {profile.get('Department','')}")
     c1,c2=st.columns(2)
-    if c1.button("🪪 Generate My Smart Card",use_container_width=True,type="primary"):
-        st.session_state.smart_card_student=profile; st.session_state.page="smart_card"; st.rerun()
+    if c1.button("🪪 Smart Card Registration",use_container_width=True,type="primary"):
+        st.session_state.smart_card_registration=find_smart_card_registration(uid); st.session_state.smart_card_hidden=False; st.session_state.page="smart_card"; st.rerun()
     if c2.button("🚪 Logout",use_container_width=True):
         audit("Student Logout","Student","",uid,profile.get("Department",""),profile.get("Semester",""),"Logout")
         logout()
