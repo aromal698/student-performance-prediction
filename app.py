@@ -38,6 +38,7 @@ REPORT_FILE = os.path.join(DATA_DIR, "student_reports.csv")
 # Permanent local archive: every submitted student record is also saved as
 # an individual JSON snapshot. Tutor actions never delete archived records.
 STUDENT_RECORDS_DIR = os.path.join(DATA_DIR, "student_records")
+STUDENT_REGISTRATIONS_FILE = os.path.join(DATA_DIR, "student_registrations.csv")
 os.makedirs(STUDENT_RECORDS_DIR, exist_ok=True)
 
 SEMESTERS = [f"S{i}" for i in range(1, 9)]
@@ -169,6 +170,8 @@ DEFAULT_STATE = {
     "page": "home", "logged_in": False, "role": None, "username": None,
     "teacher_department": None, "student_report": None,
     "dashboard_view": "department",
+    "teacher_menu_view": "menu",
+    "intro_seen": False,
 }
 for key, value in DEFAULT_STATE.items():
     if key not in st.session_state:
@@ -260,6 +263,19 @@ def inject_css():
     .good-pop { background:linear-gradient(135deg,rgba(34,197,94,.20),rgba(16,185,129,.08));border:1px solid rgba(74,222,128,.45); }
     .sad-pop { background:linear-gradient(135deg,rgba(239,68,68,.18),rgba(127,29,29,.08));border:1px solid rgba(248,113,113,.42); }
     @keyframes pop { from{transform:scale(.82);opacity:0} to{transform:scale(1);opacity:1} }
+    .intro3d{position:relative;min-height:520px;display:flex;flex-direction:column;align-items:center;justify-content:center;overflow:hidden;border:1px solid rgba(125,211,252,.18);border-radius:30px;background:radial-gradient(circle at center,rgba(30,41,59,.7),rgba(2,6,23,.92));perspective:900px;animation:introFade 7s ease-in-out forwards;}
+    .intro-glow{position:absolute;width:420px;height:420px;border-radius:50%;background:radial-gradient(circle,rgba(34,211,238,.28),transparent 65%);filter:blur(8px);animation:glowPulse 2.5s ease-in-out infinite;}
+    .intro-logo3d{position:relative;font-size:6rem;filter:drop-shadow(0 0 28px rgba(34,211,238,.8));animation:logoFloat 3s ease-in-out infinite;}
+    .intro-title{position:relative;font-size:clamp(2.5rem,6vw,5rem);font-weight:900;letter-spacing:3px;text-transform:uppercase;background:linear-gradient(90deg,#67e8f9,#c4b5fd,#f0abfc);-webkit-background-clip:text;color:transparent;text-shadow:0 0 35px rgba(99,102,241,.35);animation:titleIn 1.5s ease-out;}
+    .intro-subtitle{position:relative;color:#cbd5e1;margin-top:10px;letter-spacing:2px;text-align:center;}
+    .intro-cube{position:relative;width:150px;height:150px;margin:32px 0;transform-style:preserve-3d;animation:spinCube 6s linear infinite;}
+    .intro-cube:before,.intro-cube:after{content:"";position:absolute;inset:0;border:2px solid rgba(103,232,249,.65);background:rgba(99,102,241,.08);box-shadow:0 0 30px rgba(34,211,238,.3);}
+    .intro-cube:before{transform:rotateY(60deg)} .intro-cube:after{transform:rotateX(60deg)}
+    .intro-cube span{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);font-size:.7rem;font-weight:800;letter-spacing:1px;color:#e0f2fe;}
+    .intro-loading{position:relative;font-size:.72rem;letter-spacing:3px;color:#67e8f9;animation:blink 1s infinite;}
+    @keyframes introFade{0%,78%{opacity:1;transform:scale(1)}100%{opacity:.15;transform:scale(.98)}}
+    @keyframes glowPulse{50%{transform:scale(1.25);opacity:.65}} @keyframes logoFloat{50%{transform:translateY(-18px) rotateY(18deg)}}
+    @keyframes titleIn{from{opacity:0;transform:translateY(25px) scale(.9)}to{opacity:1;transform:none}} @keyframes spinCube{to{transform:rotateX(360deg) rotateY(360deg) rotateZ(360deg)}} @keyframes blink{50%{opacity:.35}}
     @media (prefers-reduced-motion: reduce) { .stApp::before,.stApp::after,.grid3d,.orb { animation:none !important; } }
     </style>
     """, unsafe_allow_html=True)
@@ -290,6 +306,51 @@ inject_css()
 def empty_df():
     return pd.DataFrame(columns=REPORT_COLUMNS)
 
+
+REGISTRATION_COLUMNS = ["Username", "University_ID", "Student_Name", "Registered_Time"]
+
+def empty_registration_df():
+    return pd.DataFrame(columns=REGISTRATION_COLUMNS)
+
+def load_registrations():
+    if not os.path.exists(STUDENT_REGISTRATIONS_FILE):
+        return empty_registration_df()
+    try:
+        df = pd.read_csv(STUDENT_REGISTRATIONS_FILE)
+        for col in REGISTRATION_COLUMNS:
+            if col not in df.columns:
+                df[col] = ""
+        return df[REGISTRATION_COLUMNS]
+    except Exception:
+        return empty_registration_df()
+
+def save_registrations(df):
+    df.to_csv(STUDENT_REGISTRATIONS_FILE, index=False)
+
+def register_student(username, uid, name):
+    username, uid, name = username.strip(), uid.strip(), name.strip()
+    df = load_registrations()
+    if not username or not uid or not name:
+        return False, "Enter Username, University ID and Student Name."
+    duplicate = df[
+        df["University_ID"].astype(str).str.strip().str.lower().eq(uid.lower()) |
+        (df["Username"].astype(str).str.strip().str.lower().eq(username.lower()))
+    ]
+    if not duplicate.empty:
+        return False, "This Username or University ID is already registered."
+    row = pd.DataFrame([{
+        "Username": username, "University_ID": uid, "Student_Name": name,
+        "Registered_Time": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    }], columns=REGISTRATION_COLUMNS)
+    save_registrations(pd.concat([df, row], ignore_index=True))
+    return True, f"Student {name} registered successfully."
+
+def find_registered_student(uid):
+    df = load_registrations()
+    if df.empty:
+        return None
+    found = df[df["University_ID"].astype(str).str.strip().str.lower().eq(str(uid).strip().lower())]
+    return found.iloc[-1].to_dict() if not found.empty else None
 
 def load_reports():
     if not os.path.exists(REPORT_FILE):
@@ -1123,6 +1184,21 @@ def logout():
 
 def home_page():
     app_brand()
+    if not st.session_state.get("intro_seen", False):
+        st.markdown("""
+        <div class="intro3d">
+          <div class="intro-glow"></div>
+          <div class="intro-logo3d">🎓</div>
+          <div class="intro-title">EduPredict SPP</div>
+          <div class="intro-subtitle">3D Student Performance Prediction • KTU B.Tech</div>
+          <div class="intro-cube"><span>ANN</span><span>K-MEANS</span><span>KTU</span></div>
+          <div class="intro-loading">INITIALIZING PERFORMANCE ENGINE • • •</div>
+        </div>
+        """, unsafe_allow_html=True)
+        if st.button("▶ Enter EduPredict SPP", use_container_width=True, type="primary"):
+            st.session_state.intro_seen = True
+            st.rerun()
+        st.caption("The 3D introduction will fade automatically; click Enter to continue immediately.")
     st.markdown("""
     <div class="hero">
       <div class="grid3d"></div><div class="orb o1"></div><div class="orb o2"></div>
@@ -1170,7 +1246,8 @@ def teacher_login():
             st.session_state.username = username.strip()
             st.session_state.teacher_department = account["department"]
             st.session_state.active_department = account["department"]
-            st.session_state.page = "teacher_dashboard"
+            st.session_state.teacher_menu_view = "menu"
+            st.session_state.page = "teacher_portal"
             st.rerun()
         else:
             st.error("Invalid tutor username or password.")
@@ -1307,6 +1384,49 @@ def kmeans_analysis(department):
 # ============================================================
 # TUTOR WORKFLOW
 # ============================================================
+def tutor_portal():
+    app_brand()
+    st.title("👨‍🏫 Tutor Control Center")
+    st.caption(f"Logged in as: **{st.session_state.get('username', '')}**")
+    st.info("Choose what you want to do. Student registration must be completed before entering marks.")
+
+    c1, c2 = st.columns(2)
+    with c1:
+        st.markdown("### 🧑‍🎓 Student Registration")
+        st.write("Register a student using Username, University ID and Name.")
+        if st.button("Open Student Registration", use_container_width=True, type="primary"):
+            st.session_state.teacher_menu_view = "registration"
+            st.rerun()
+    with c2:
+        st.markdown("### 📝 Student Mark Entry")
+        st.write("Enter marks only for students who are already registered.")
+        if st.button("Open Student Mark Entry", use_container_width=True, type="primary"):
+            st.session_state.teacher_menu_view = "marks"
+            st.session_state.page = "teacher_dashboard"
+            st.rerun()
+
+    st.divider()
+    if st.session_state.get("teacher_menu_view") == "registration":
+        st.subheader("🧑‍🎓 Register Student")
+        with st.form("student_registration_form"):
+            username = st.text_input("Student Username")
+            uid = st.text_input("University ID")
+            name = st.text_input("Student Name")
+            submitted = st.form_submit_button("✅ Submit Registration", use_container_width=True, type="primary")
+        if submitted:
+            ok, msg = register_student(username, uid, name)
+            (st.success if ok else st.error)(msg)
+        reg = load_registrations()
+        st.subheader(f"📋 Registered Students ({len(reg)})")
+        if reg.empty:
+            st.info("No students registered yet.")
+        else:
+            st.dataframe(reg, use_container_width=True, hide_index=True)
+
+    if st.button("🚪 Logout", use_container_width=True):
+        logout()
+
+
 def manual_add_form(department, semester):
     st.subheader("➕ Add One Student")
     st.caption("Subjects are controlled by the Department + Semester selected at the top of the Tutor Dashboard.")
@@ -1326,11 +1446,23 @@ def manual_add_form(department, semester):
         hide_index=True,
     )
 
+    registered = load_registrations()
+    if registered.empty:
+        st.warning("No registered students found. Go to Tutor Control Center → Student Registration first.")
+        return
+
+    registered_display = registered.apply(
+        lambda r: f"{r['University_ID']} — {r['Student_Name']} ({r['Username']})", axis=1
+    ).tolist()
+
     with st.form(f"add_student_{re.sub(r'[^a-zA-Z0-9]', '_', department)}_{semester}"):
-        c1, c2, c3 = st.columns(3)
-        username = c1.text_input("Username")
-        name = c2.text_input("Student Name")
-        uid = c3.text_input("University ID")
+        selected_student = st.selectbox("Registered Student (University ID — Name)", registered_display)
+        selected_idx = registered_display.index(selected_student)
+        reg_row = registered.iloc[selected_idx]
+        uid = str(reg_row["University_ID"]).strip()
+        username = str(reg_row["Username"]).strip()
+        name = str(reg_row["Student_Name"]).strip()
+        st.success(f"✅ Registered: **{name}**  •  University ID: **{uid}**")
 
         st.markdown("### Enter marks for the selected subjects")
         values = []
@@ -1358,8 +1490,8 @@ def manual_add_form(department, semester):
         )
 
     if submitted:
-        if not username.strip() or not name.strip() or not uid.strip():
-            st.error("Enter Username, Student Name and University ID.")
+        if not find_registered_student(uid):
+            st.error("This student is not registered. Register the student first.")
             return
         if len(subjects) != 6:
             st.error("This project requires exactly 6 subjects for the selected Semester + Department.")
@@ -1377,8 +1509,15 @@ def teacher_dashboard():
     if assigned_department not in DEPARTMENTS:
         assigned_department = DEPARTMENTS[0]
 
-    st.title("👨‍🏫 Tutor Dashboard")
-    st.info(f"Tutor account department: **{assigned_department}**")
+    st.title("📝 Student Mark Entry")
+    st.info(f"Tutor account department: **{assigned_department}**  •  Only registered students can receive marks.")
+    cback, clog = st.columns(2)
+    if cback.button("← Back to Tutor Control Center", use_container_width=True):
+        st.session_state.page = "teacher_portal"
+        st.session_state.teacher_menu_view = "menu"
+        st.rerun()
+    if clog.button("🚪 Logout", use_container_width=True):
+        logout()
 
     # IMPORTANT: these selectors are outside every form/tab. Streamlit reruns
     # immediately when either value changes, so the subject list always follows
@@ -1437,12 +1576,25 @@ def teacher_dashboard():
         if uploaded is not None and st.button("🚀 Submit Uploaded Students", type="primary"):
             try:
                 reports = uploaded_to_reports(uploaded, department)
+                valid_reports = []
+                rejected = []
+                for report in reports:
+                    reg = find_registered_student(report.get("University_ID", ""))
+                    if not reg:
+                        rejected.append(str(report.get("University_ID", "")))
+                        continue
+                    if str(reg.get("Username", "")).strip().lower() != str(report.get("Username", "")).strip().lower() or str(reg.get("Student_Name", "")).strip().lower() != str(report.get("Student_Name", "")).strip().lower():
+                        rejected.append(str(report.get("University_ID", "")))
+                        continue
+                    valid_reports.append(report)
+                if valid_reports:
+                    for report in valid_reports:
+                        upsert_report(report)
+                    st.success(f"✅ {len(valid_reports)} registered student record(s) uploaded successfully.")
+                if rejected:
+                    st.warning("⚠️ These rows were skipped because the student is not registered or the Username/Name does not match: " + ", ".join(rejected))
                 if not reports:
                     st.warning("No valid student rows were found in the CSV.")
-                else:
-                    for report in reports:
-                        upsert_report(report)
-                    st.success(f"✅ {len(reports)} student record(s) uploaded successfully.")
             except Exception as exc:
                 st.error(f"Upload failed: {exc}")
 
@@ -1644,6 +1796,8 @@ elif st.session_state.page == "teacher_login":
     teacher_login()
 elif st.session_state.page == "student_login":
     student_login()
+elif st.session_state.page == "teacher_portal" and st.session_state.logged_in and st.session_state.role == "teacher":
+    tutor_portal()
 elif st.session_state.page == "teacher_dashboard" and st.session_state.logged_in and st.session_state.role == "teacher":
     teacher_dashboard()
 elif st.session_state.page == "all_department_analysis" and st.session_state.logged_in and st.session_state.role == "teacher":
