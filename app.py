@@ -290,6 +290,42 @@ def inject_css():
     .glass {{ background:rgba(15,23,42,.68); border:1px solid rgba(255,255,255,.14); border-radius:22px; padding:24px; backdrop-filter:blur(18px); }}
     .metric-card {{ padding:20px; border-radius:20px; border:1px solid rgba(255,255,255,.10); background:linear-gradient(135deg,rgba(30,41,59,.75),rgba(15,23,42,.7)); }}
     .metric-card .value{{font-size:2rem;font-weight:800}} .metric-card .label{{color:#94a3b8}}
+
+    /* STATIC BEAUTIFUL BLUE WALLPAPER - no moving/animated background */
+    .stApp::before, .stApp::after,
+    .dynamic-3d-wallpaper, .dynamic-3d-wallpaper *,
+    .login-grid, .login-orb, .login-main-emoji {{
+        animation: none !important;
+        transition: none !important;
+    }}
+    .stApp::before {{
+        animation: none !important;
+        background:
+          radial-gradient(circle at 12% 18%, rgba(56,189,248,.24), transparent 23%),
+          radial-gradient(circle at 88% 20%, rgba(37,99,235,.22), transparent 25%),
+          radial-gradient(circle at 58% 86%, rgba(59,130,246,.18), transparent 28%),
+          linear-gradient(135deg,#020817 0%,#06285d 48%,#0b3b82 72%,#020817 100%) !important;
+    }}
+    .stApp::after {{
+        animation: none !important;
+        background-image:
+          linear-gradient(rgba(125,211,252,.075) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(125,211,252,.075) 1px, transparent 1px) !important;
+        background-size: 64px 64px !important;
+    }}
+    .dynamic-3d-wallpaper {{
+        opacity: .95;
+        transform: none !important;
+    }}
+    .dynamic-3d-wallpaper .orb-a {{ left: 7%; top: 13%; transform: none !important; }}
+    .dynamic-3d-wallpaper .orb-b {{ right: 4%; top: 8%; transform: none !important; }}
+    .dynamic-3d-wallpaper .orb-c {{ right: 25%; bottom: 4%; transform: none !important; }}
+    .dynamic-3d-wallpaper .ring.one {{ transform: rotateX(68deg) rotateY(12deg) !important; }}
+    .dynamic-3d-wallpaper .ring.two {{ transform: rotateY(68deg) rotateZ(20deg) !important; }}
+    .dynamic-3d-wallpaper .cube {{ transform: rotateX(18deg) rotateY(-24deg) rotateZ(8deg) !important; }}
+    .login-grid {{ animation: none !important; }}
+    .login-orb {{ animation: none !important; transform: none !important; }}
+    .login-main-emoji {{ animation: none !important; transform: none !important; }}
     .brand-bar {{ display:flex; align-items:center; gap:14px; margin:0 0 22px; padding:10px 14px; width:max-content; border:1px solid rgba(125,211,252,.20); border-radius:18px; background:rgba(2,6,23,.48); backdrop-filter:blur(12px); }}
     .brand-mark {{ width:58px;height:58px; flex:0 0 58px; border-radius:17px; display:grid; place-items:center; background:linear-gradient(135deg,#22d3ee,#6366f1 55%,#a855f7); box-shadow:0 0 28px rgba(99,102,241,.42); }}
     .brand-name {{ font-weight:900; letter-spacing:.4px; font-size:1.05rem; color:#f8fafc; }} .brand-tag {{ color:#94a3b8; font-size:.72rem; margin-top:2px; }}
