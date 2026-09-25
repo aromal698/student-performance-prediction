@@ -1212,6 +1212,30 @@ SMART_CARD_COLUMNS = [
     "University_Name", "University_ID", "Submitted_Time"
 ]
 
+# University list used by the Smart Card form.  "Other / Not Listed" lets
+# students enter a university that is not in the list.
+UNIVERSITY_OPTIONS = [
+    "APJ Abdul Kalam Technological University (KTU)",
+    "University of Kerala",
+    "Mahatma Gandhi University (MGU)",
+    "University of Calicut",
+    "Kannur University",
+    "Cochin University of Science and Technology (CUSAT)",
+    "Kerala University of Fisheries and Ocean Studies (KUFOS)",
+    "Kerala Agricultural University (KAU)",
+    "National University of Advanced Legal Studies (NUALS)",
+    "Indian Institute of Technology Palakkad (IIT Palakkad)",
+    "Indian Institute of Space Science and Technology (IIST)",
+    "Amrita Vishwa Vidyapeetham",
+    "Rajagiri School of Engineering & Technology",
+    "Federal Institute of Science and Technology (FISAT)",
+    "SCMS School of Engineering and Technology",
+    "Other / Not Listed",
+]
+
+BLOOD_GROUPS = ["A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"]
+
+
 def load_smart_cards():
     if not os.path.exists(SMART_CARD_FILE):
         return pd.DataFrame(columns=SMART_CARD_COLUMNS)
@@ -1222,115 +1246,221 @@ def load_smart_cards():
                 df[col] = ""
         return df[SMART_CARD_COLUMNS]
     except Exception:
+        # A damaged/empty CSV must not crash the Student site.
         return pd.DataFrame(columns=SMART_CARD_COLUMNS)
 
+
 def save_smart_card(row):
+    """Insert or update a Smart Card record safely."""
+    os.makedirs(DATA_DIR, exist_ok=True)
     df = load_smart_cards()
-    reg_id = str(row.get("Registration_ID", "")).strip()
-    if reg_id and not df.empty:
-        df = df[df["Registration_ID"].astype(str).str.strip() != reg_id]
+    row = {col: str(row.get(col, "")) for col in SMART_CARD_COLUMNS}
+    reg_id = row["Registration_ID"].strip().upper()
+    uid = row["University_ID"].strip().upper()
+
+    if not df.empty:
+        if reg_id:
+            df = df[df["Registration_ID"].astype(str).str.strip().str.upper() != reg_id]
+        if uid:
+            df = df[df["University_ID"].astype(str).str.strip().str.upper() != uid]
+
     df = pd.concat([df, pd.DataFrame([row], columns=SMART_CARD_COLUMNS)], ignore_index=True)
     df.to_csv(SMART_CARD_FILE, index=False)
 
-def create_student_card_png(profile):
-    """Create a dependency-safe ATM-style PNG smart card."""
+
+def _font(size, bold=False):
     if not PIL_AVAILABLE:
-        raise RuntimeError("Pillow is required for Smart Card PNG generation. Add Pillow to requirements.txt.")
-    W,H=1010,638
-    img=Image.new("RGB",(W,H),(15,23,42))
-    draw=ImageDraw.Draw(img)
-    # premium gradient
+        return ImageFont.load_default()
+    names = [
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf" if bold else "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "DejaVuSans-Bold.ttf" if bold else "DejaVuSans.ttf",
+    ]
+    for name in names:
+        try:
+            return ImageFont.truetype(name, size)
+        except Exception:
+            pass
+    return ImageFont.load_default()
+
+
+def _fit_text(draw, text, font, max_width):
+    """Shorten text safely so long university/college names never overflow."""
+    text = str(text or "").strip()
+    if not text:
+        return "—"
+    if draw.textbbox((0, 0), text, font=font)[2] <= max_width:
+        return text
+    while len(text) > 3 and draw.textbbox((0, 0), text + "…", font=font)[2] > max_width:
+        text = text[:-1]
+    return text + "…"
+
+
+def create_student_card_png(profile):
+    """Create a polished, self-contained ATM-style Smart Card PNG."""
+    if not PIL_AVAILABLE:
+        raise RuntimeError("Pillow is required. Add Pillow to requirements.txt.")
+
+    W, H = 1200, 760
+    img = Image.new("RGB", (W, H), (8, 15, 35))
+    draw = ImageDraw.Draw(img)
+
+    # Multi-stop premium gradient background.
+    stops = [
+        (0, (10, 28, 70)),
+        (W // 2, (30, 58, 125)),
+        (W, (76, 30, 115)),
+    ]
     for x in range(W):
-        t=x/(W-1)
-        r=int(20+45*t); g=int(80+30*(1-t)); b=int(160+70*t)
-        draw.line((x,0,x,H),fill=(r,g,b))
-    for y in range(0,H,6):
-        draw.line((0,y,W,y),fill=(255,255,255,10))
-    try:
-        font_b=ImageFont.truetype("DejaVuSans-Bold.ttf",34)
-        font=ImageFont.truetype("DejaVuSans.ttf",24)
-        font_sm=ImageFont.truetype("DejaVuSans.ttf",19)
-    except Exception:
-        font_b=font=font_sm=ImageFont.load_default()
-    draw.rounded_rectangle((22,22,W-22,H-22),radius=34,outline=(255,255,255),width=2)
-    draw.text((55,48),"EduPredict SPP",font=font_b,fill="white")
-    draw.text((W-280,55),"STUDENT SMART CARD",font=font_sm,fill=(230,245,255))
-    draw.rounded_rectangle((58,130,220,250),radius=18,fill=(235,200,105),outline=(255,255,255),width=2)
-    draw.line((76,160,202,160),fill=(150,110,35),width=3); draw.line((76,190,202,190),fill=(150,110,35),width=3); draw.line((76,220,202,220),fill=(150,110,35),width=3)
-    name=str(profile.get("Student_Name", "")).strip()[:30]
-    uid=str(profile.get("University_ID","")).strip()[:28]
-    dept=str(profile.get("Department","")).strip()[:42]
-    college=str(profile.get("Studied_College","")).strip()[:45]
-    sem=str(profile.get("Semester","")).strip()
-    draw.text((260,135),name,font=font_b,fill="white")
-    draw.text((260,182),f"University ID: {uid}",font=font,fill=(235,245,255))
-    draw.text((260,224),f"Department: {dept}",font=font_sm,fill=(235,245,255))
-    draw.text((55,315),f"College: {college}",font=font_sm,fill="white")
-    draw.text((55,365),f"Semester: {sem}",font=font_sm,fill="white")
-    draw.text((55,410),f"Registration ID: {str(profile.get('Registration_ID',''))}",font=font_sm,fill="white")
-    draw.text((55,520),"KTU B.Tech • Academic Smart Identity",font=font_sm,fill=(225,240,255))
-    draw.text((W-280,520),"EDUPREDICT",font=font_b,fill="white")
+        for i in range(len(stops) - 1):
+            if stops[i][0] <= x <= stops[i + 1][0]:
+                x0, c0 = stops[i]; x1, c1 = stops[i + 1]
+                t = (x - x0) / max(1, x1 - x0)
+                c = tuple(int(c0[j] + (c1[j] - c0[j]) * t) for j in range(3))
+                break
+        draw.line((x, 0, x, H), fill=c)
+
+    # Soft decorative glow circles.
+    for cx, cy, r, fill in [
+        (1020, 95, 220, (90, 210, 255)),
+        (110, 680, 190, (120, 70, 255)),
+        (650, 360, 260, (255, 255, 255)),
+    ]:
+        layer = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+        ld = ImageDraw.Draw(layer)
+        for rr in range(r, 5, -8):
+            alpha = max(0, int(2.0 * (r - rr)))
+            ld.ellipse((cx-rr, cy-rr, cx+rr, cy+rr), fill=(*fill, min(35, alpha)))
+        img = Image.alpha_composite(img.convert("RGBA"), layer).convert("RGB")
+        draw = ImageDraw.Draw(img)
+
+    # Outer card and inner glass panel.
+    draw.rounded_rectangle((18, 18, W-18, H-18), radius=42,
+                           fill=(255, 255, 255), outline=(255, 255, 255), width=3)
+    draw.rounded_rectangle((25, 25, W-25, H-25), radius=38,
+                           fill=None, outline=(120, 220, 255), width=2)
+
+    f_title = _font(38, True)
+    f_small = _font(22)
+    f_bold = _font(28, True)
+    f_name = _font(34, True)
+    f_value = _font(25)
+    f_tiny = _font(18)
+
+    draw.text((62, 52), "EduPredict SPP", font=f_title, fill=(255, 255, 255))
+    draw.text((W-365, 61), "STUDENT SMART CARD", font=f_small, fill=(220, 245, 255))
+    draw.text((W-365, 92), "ACADEMIC IDENTITY • 2026", font=f_tiny, fill=(180, 220, 245))
+
+    # Contactless-style symbol.
+    cx, cy = 1040, 185
+    for off in (0, 18, 36):
+        draw.arc((cx-55+off, cy-55+off, cx+55-off, cy+55-off), 210, 330,
+                 fill=(225, 250, 255), width=5)
+    draw.ellipse((cx-8, cy-8, cx+8, cy+8), fill=(225, 250, 255))
+
+    # Smart chip.
+    chip = (65, 150, 235, 275)
+    draw.rounded_rectangle(chip, radius=18, fill=(229, 194, 93), outline=(255, 245, 190), width=3)
+    for yy in (180, 212, 244):
+        draw.line((78, yy, 222, yy), fill=(150, 115, 40), width=3)
+    draw.line((145, 160, 145, 265), fill=(150, 115, 40), width=3)
+    draw.line((78, 228, 222, 228), fill=(150, 115, 40), width=3)
+
+    # Student identity.
+    name = _fit_text(draw, profile.get("Student_Name", ""), f_name, 660)
+    uid = _fit_text(draw, profile.get("University_ID", "") or "Not Provided", f_value, 660)
+    draw.text((285, 145), name, font=f_name, fill=(255, 255, 255))
+    draw.text((285, 197), f"University ID  •  {uid}", font=f_value, fill=(225, 242, 255))
+
+    # Information panels.
+    dept = _fit_text(draw, profile.get("Department", ""), f_value, 480)
+    college = _fit_text(draw, profile.get("Studied_College", ""), f_value, 480)
+    university = _fit_text(draw, profile.get("University_Name", ""), f_value, 480)
+    semester = str(profile.get("Semester", "") or "—")
+    reg = _fit_text(draw, profile.get("Registration_ID", ""), f_value, 480)
+
+    cards = [
+        (55, 325, "DEPARTMENT", dept),
+        (620, 325, "SEMESTER", semester),
+        (55, 420, "COLLEGE", college),
+        (620, 420, "REGISTRATION ID", reg),
+        (55, 515, "UNIVERSITY", university),
+        (620, 515, "BLOOD GROUP", str(profile.get("Blood_Group", "—"))),
+    ]
+    for x, y, label, value in cards:
+        draw.rounded_rectangle((x, y, x+525, y+78), radius=16,
+                               fill=(255, 255, 255), outline=(150, 220, 255), width=2)
+        draw.text((x+18, y+9), label, font=f_tiny, fill=(75, 105, 145))
+        draw.text((x+18, y+36), value, font=f_value, fill=(18, 35, 65))
+
+    # Footer / authenticity line.
+    draw.text((55, 650), "EduPredict SPP  •  Student Performance Prediction", font=f_small, fill=(230, 245, 255))
+    draw.text((W-355, 650), "SMART ID • VALID RECORD", font=f_tiny, fill=(190, 225, 245))
+    draw.line((55, 705, W-55, 705), fill=(150, 220, 255), width=2)
+    draw.text((55, 715), "Keep this card for academic identification", font=f_tiny, fill=(205, 230, 250))
+
     return img
+
+
+def _clear_card_preview():
+    st.session_state.smart_card_preview = None
+    st.session_state.smart_card_message = "Smart Card downloaded. Preview removed."
+
 
 def smart_card_page():
     app_brand()
     st.title("🪪 Student Smart Card")
-    current_year = datetime.now().year
-    min_dob = date(current_year - 100, 1, 1)
-    max_dob = datetime.now().date()
-    st.caption(
-        f"Enter your Smart Card details. DOB is available up to {current_year}; "
-        "the maximum year updates automatically every year."
-    )
+    st.caption("Create a professional academic Smart Card. Registration details are stored for the Principal portal.")
+
     if st.session_state.get("smart_card_message"):
         st.success(st.session_state.smart_card_message)
         st.session_state.smart_card_message = ""
 
-    university_options = UNIVERSITIES
+    # Never allow a future DOB. The range automatically moves forward each year.
+    today = datetime.now().date()
+    min_dob = today.replace(year=max(1900, today.year - 100))
+    max_dob = today
+    default_dob = today.replace(year=max(2000, min(today.year - 18, today.year)))
+
     with st.form("smart_card_registration_form", clear_on_submit=False):
         c1, c2 = st.columns(2)
         with c1:
-            reg_id = st.text_input("Registration ID *", placeholder=f"e.g. REG{current_year}CE001")
+            reg_id = st.text_input("Registration ID *", placeholder="e.g. REG2026CE001")
             name = st.text_input("Student Name *")
-            dob = st.date_input(
-                "Date of Birth (DOB) *",
-                value=date(2007, 1, 1),
-                min_value=min_dob,
-                max_value=max_dob,
-                format="DD/MM/YYYY",
-                help=f"DOB year range: {current_year - 100}–{current_year}. This automatically moves forward each year."
-            )
-            blood = st.selectbox("Blood Group *", ["A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"])
+            dob = st.date_input("Date of Birth *", value=default_dob, min_value=min_dob, max_value=max_dob)
+            blood = st.selectbox("Blood Group *", BLOOD_GROUPS)
             address = st.text_area("Address *", height=90)
-            pin = st.text_input("PIN Code *", max_chars=6)
+            pin = st.text_input("PIN Code *", max_chars=6, placeholder="6-digit PIN")
         with c2:
             college = st.text_input("Studied College *")
             department = st.selectbox("Department *", DEPARTMENTS)
             semester = st.selectbox("Semester *", SEMESTERS)
             cgpa = st.number_input("CGPA (optional)", min_value=0.0, max_value=10.0, value=0.0, step=0.01)
-            university = st.selectbox("University Name *", university_options)
-            if university == "Other / Not Listed":
-                university_other = st.text_input("Enter University Name *", placeholder="Type your university name")
-            else:
-                university_other = ""
-            uid = st.text_input("University ID (optional)")
+            university_choice = st.selectbox("University *", UNIVERSITY_OPTIONS)
+            other_university = ""
+            if university_choice == "Other / Not Listed":
+                other_university = st.text_input("Enter University Name *")
+            uid = st.text_input("University ID (optional)", placeholder="e.g. KTU24CS001")
 
-        submitted = st.form_submit_button("🪪 Submit & Generate Smart Card", type="primary", use_container_width=True)
+        submitted = st.form_submit_button("✨ Create & Register Smart Card", type="primary", use_container_width=True)
 
     if submitted:
-        final_university = university_other.strip() if university == "Other / Not Listed" else university.strip()
-        required = [reg_id, name, address, pin, college, department, semester, final_university]
-        if not all(str(x).strip() for x in required):
-            st.error("Please fill all required (*) fields.")
-            return
-        if dob > max_dob:
-            st.error(f"Date of Birth cannot be after {max_dob.strftime('%d/%m/%Y')}.")
-            return
-        if not re.fullmatch(r"\d{6}", pin.strip()):
-            st.error("PIN Code must contain exactly 6 digits.")
-            return
-        if not re.fullmatch(r"[A-Za-z0-9_-]{4,30}", reg_id.strip()):
-            st.error("Registration ID must be 4–30 characters using letters, numbers, _ or - only.")
+        university = other_university.strip() if university_choice == "Other / Not Listed" else university_choice
+        errors = []
+        if not reg_id.strip():
+            errors.append("Registration ID is required.")
+        elif not re.fullmatch(r"[A-Za-z0-9_-]{4,30}", reg_id.strip()):
+            errors.append("Registration ID must be 4–30 characters using letters, numbers, _ or - only.")
+        if not name.strip(): errors.append("Student Name is required.")
+        if not address.strip(): errors.append("Address is required.")
+        if not re.fullmatch(r"\d{6}", pin.strip()): errors.append("PIN Code must contain exactly 6 digits.")
+        if not college.strip(): errors.append("Studied College is required.")
+        if not university: errors.append("University is required.")
+        if dob > today: errors.append("Date of Birth cannot be in the future.")
+        if not (min_dob <= dob <= max_dob): errors.append("Please select a valid Date of Birth.")
+
+        if errors:
+            for err in errors:
+                st.error("❌ " + err)
             return
 
         row = {
@@ -1344,43 +1474,40 @@ def smart_card_page():
             "Department": department,
             "Semester": semester,
             "CGPA": f"{cgpa:.2f}" if cgpa else "",
-            "University_Name": final_university,
+            "University_Name": university,
             "University_ID": uid.strip(),
-            "Submitted_Time": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            "Submitted_Time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         }
-        save_smart_card(row)
+
         try:
+            save_smart_card(row)
             img = create_student_card_png(row)
-            safe_reg = re.sub(r"[^A-Za-z0-9_-]", "_", reg_id.strip())
-            path = os.path.join(SMART_CARD_DIR, f"{safe_reg}.png")
-            img.save(path, "PNG")
-            import io as _io
-            buf = _io.BytesIO()
-            img.save(buf, "PNG")
+            safe_id = re.sub(r"[^A-Za-z0-9_-]", "_", reg_id.strip()) or "student_card"
+            path = os.path.join(SMART_CARD_DIR, safe_id + ".png")
+            img.save(path, "PNG", optimize=True)
+            buf = io.BytesIO()
+            img.save(buf, format="PNG", optimize=True)
             st.session_state.smart_card_preview = buf.getvalue()
-            st.session_state.smart_card_message = (
-                "Smart Card registered successfully. Full details are available in the Principal portal."
-            )
+            st.session_state.smart_card_message = "Smart Card created and registered successfully."
             st.rerun()
-        except Exception as e:
-            st.error(f"Smart Card generation error: {e}")
+        except Exception as exc:
+            st.error("❌ Smart Card could not be generated.")
+            st.exception(exc)
 
-    if st.session_state.get("smart_card_preview"):
-        st.subheader("Smart Card Preview")
-        st.image(st.session_state.smart_card_preview, use_container_width=True)
-
-        def clear_card_preview():
-            st.session_state.smart_card_preview = None
-            st.session_state.smart_card_message = "Smart Card downloaded successfully. Preview removed."
-
+    card_data = st.session_state.get("smart_card_preview")
+    if card_data:
+        st.divider()
+        st.subheader("✨ Your Smart Card")
+        st.image(card_data, caption="EduPredict SPP Academic Smart Card", use_container_width=True)
         st.download_button(
-            "📥 Download Smart Card PNG",
-            data=st.session_state.smart_card_preview,
-            file_name="Student_Smart_Card.png",
+            "📥 Download Smart Card (PNG)",
+            data=card_data,
+            file_name="EduPredict_Student_Smart_Card.png",
             mime="image/png",
             use_container_width=True,
-            on_click=clear_card_preview
+            on_click=_clear_card_preview,
         )
+        st.caption("After downloading, the preview is automatically removed from the page.")
 
     if st.button("⬅️ Back", use_container_width=True):
         st.session_state.page = "home"
