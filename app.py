@@ -1327,6 +1327,30 @@ def home_page():
     if c.button("🪪 Student Smart Card (Self Registration)",use_container_width=True):
         st.session_state.page="smart_card"; st.rerun()
 
+    st.markdown("### 👤 Student Profile — Quick Visit")
+    st.caption("Enter your University ID + Student Name to view your registered profile directly. Tutor marks are NOT required.")
+    with st.form("home_student_profile_lookup"):
+        h1, h2 = st.columns(2)
+        home_uid = h1.text_input("🪪 University ID", placeholder="e.g. SNM25CE001")
+        home_name = h2.text_input("👤 Student Name", placeholder="Enter your registered name")
+        view_profile = st.form_submit_button("🔎 View My Profile", type="primary", use_container_width=True)
+    if view_profile:
+        if not home_uid.strip() or not home_name.strip():
+            st.error("Please enter both University ID and Student Name.")
+        else:
+            prof = find_student(home_name.strip(), home_uid.strip())
+            if prof:
+                st.success("✅ Profile found. No tutor marks are required to view this profile.")
+                p1,p2,p3,p4 = st.columns(4)
+                p1.metric("👤 Name", prof.get("Student_Name", "—"))
+                p2.metric("🪪 University ID", prof.get("University_ID", "—"))
+                p3.metric("🏫 Department", prof.get("Department", "—"))
+                p4.metric("📚 Semester", prof.get("Semester", "—"))
+                st.write(f"**Studied College:** {prof.get('Studied_College', '—')}")
+                st.write(f"**Registered At:** {prof.get('Registered_Time', '—')}")
+            else:
+                st.error("Profile not found. Check the University ID and Student Name.")
+
 
 def login_shell(title, subtitle):
     app_brand()
