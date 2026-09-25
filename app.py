@@ -177,6 +177,35 @@ TEACHERS = {
     "teacher_me": {"password": "ktutech", "department": "Mechanical Engineering"},
 }
 
+# ============================================================
+# STUDENT CREDIT RULES
+# ============================================================
+# Six subjects: 3 core subjects = 4 credits each; remaining
+# subjects = 3, 3 and 2 credits. Credit is awarded ONLY when
+# the subject is passed. Project pass threshold: 40%.
+SUBJECT_CREDITS = [4, 4, 4, 3, 3, 2]
+PASS_MARK = 40.0
+
+def subject_passed(subject):
+    try:
+        return float(subject.get("Overall", 0)) >= PASS_MARK
+    except (TypeError, ValueError):
+        return False
+
+def calculate_total_credits(subjects):
+    total = 0
+    earned = []
+    for i, subject in enumerate(subjects):
+        credit = SUBJECT_CREDITS[i] if i < len(SUBJECT_CREDITS) else 0
+        passed = subject_passed(subject)
+        subject["Credit"] = int(credit if passed else 0)
+        subject["Pass_Status"] = "PASS" if passed else "NOT PASS"
+        if passed:
+            total += credit
+            earned.append(f"{subject.get('Subject','Subject')} ({credit})")
+    return int(total), earned
+
+
 REPORT_COLUMNS = [
     "Username", "Student_Name", "University_ID", "Semester", "Department",
     "Subjects_JSON", "Created_Time"
@@ -945,9 +974,9 @@ def create_pdf(report):
     subjects = parse_subjects(report["Subjects_JSON"])
     overall = float(np.mean([x["Overall"] for x in subjects])) if subjects else 0
     overall_level = "Good" if overall >= 80 else "Above Average" if overall >= 65 else "Average" if overall >= 50 else "Needs Improvement"
-    tutor_credit = float(np.mean([float(x.get("Tutor_Credit_10", overall/10)) for x in subjects])) if subjects else 0.0
-    prediction = str(subjects[0].get("Automatic_Prediction", automatic_prediction(tutor_credit))) if subjects else automatic_prediction(tutor_credit)
-    story.append(Paragraph(f"<b>Overall Performance:</b> {overall:.2f}% &nbsp;&nbsp; <b>Student Credit:</b> {tutor_credit:.2f}/10 &nbsp;&nbsp; <b>Prediction:</b> {performance_circle(prediction)} {prediction}", styles["Heading2"]))
+    total_credits, _earned = calculate_total_credits(subjects)
+    prediction = str(subjects[0].get("Automatic_Prediction", automatic_prediction(overall/10))) if subjects else automatic_prediction(overall/10)
+    story.append(Paragraph(f"<b>Overall Performance:</b> {overall:.2f}% &nbsp;&nbsp; <b>Earned Credits:</b> {total_credits} &nbsp;&nbsp; <b>Prediction:</b> {performance_circle(prediction)} {prediction}", styles["Heading2"]))
     story.append(Paragraph(f"<b>Subjects:</b> {len(subjects)} &nbsp;&nbsp; <b>Average Attendance:</b> {np.mean([x['Attendance'] for x in subjects]):.1f}% &nbsp;&nbsp; <b>Average Internal:</b> {np.mean([x['Internal'] for x in subjects]):.1f}/40", small))
     story.append(Spacer(1, 10))
 
@@ -1683,7 +1712,6 @@ def tutor_mark_entry(department, semester):
 
     tutor_profile = get_tutor_profile(st.session_state.username)
     default_tutor_name = str(tutor_profile.get("Tutor_Name", "")).strip() or st.session_state.username
-    tutor_credit = float(tutor_profile.get("Credit_Score", 0) or 0)
 
     labels = {f"{r['University_ID']} — {r['Student_Name']}": r for _, r in regs.iterrows()}
     selected_label = st.selectbox("Select registered student", list(labels.keys()), key="mark_entry_student")
@@ -1694,7 +1722,7 @@ def tutor_mark_entry(department, semester):
     old_subs = parse_subjects(old.iloc[0]["Subjects_JSON"]) if not old.empty else []
     old_map = {x.get("Subject"): x for x in old_subs}
 
-    st.info(f"👨‍🏫 Tutor: **{default_tutor_name}**  •  Tutor Credit: **{tutor_credit:.2f}/10**")
+    st.info(f"👨‍🏫 Tutor: **{default_tutor_name}**  •  Department: **{department}**  •  Semester: **{semester}**")
     with st.form("mark_entry_form"):
         tutor_name = st.text_input("👨‍🏫 Tutor Name *", value=default_tutor_name)
         values = []
@@ -1709,7 +1737,7 @@ def tutor_mark_entry(department, semester):
             values.append(normalize_subject({"Subject":subject,"Study_Hours":0,"Attendance":att,"Internal":internal,"Assignment":assignment,"Previous":previous}))
 
         completed = st.checkbox("✅ Completed — include this Tutor work in Principal salary analysis", value=False, help="Only completed tutor work is counted for salary.")
-        submitted = st.form_submit_button("💾 Submit Marks + Predict + Calculate Credit", type="primary", use_container_width=True)
+        submitted = st.form_submit_button("💾 Submit Marks + Predict + Save Result", type="primary", use_container_width=True)
 
     if submitted:
         if not tutor_name.strip():
@@ -1719,28 +1747,29 @@ def tutor_mark_entry(department, semester):
             st.error("Exactly 6 subjects are required.")
             return
 
-        credit_10 = tutor_overall_credit_10(values)
-        prediction = automatic_prediction(credit_10)
+        total_credits, _earned = calculate_total_credits(values)
+        prediction = automatic_prediction(float(np.mean([float(v.get("Overall", 0)) for v in values])) / 10.0)
         for item in values:
             item["Tutor_Name"] = tutor_name.strip()
-            item["Tutor_Credit_10"] = credit_10
+            item.pop("Tutor_Credit_10", None)
             item["Automatic_Prediction"] = prediction
             item["Tutor_Completed"] = bool(completed)
+            item["Credit"] = int(item.get("Credit", 0))
 
         report = make_report("", selected["Student_Name"], selected["University_ID"], semester, department, values)
         upsert_report(report)
         # Explicitly sync tutor identity + credit to the shared Principal portal.
-        save_tutor_profile(st.session_state.username, tutor_name.strip(), department, tutor_credit)
+        save_tutor_profile(st.session_state.username, tutor_name.strip(), department, 0.0)
         audit("Student Mark Submission", "Tutor", st.session_state.username, selected["University_ID"], department, semester,
-              f"Tutor={tutor_name.strip()}; Automatic Prediction={prediction}; Student Credit={credit_10:.2f}/10")
+              f"Tutor={tutor_name.strip()}; Automatic Prediction={prediction}; Earned Credits={total_credits}")
         if completed:
             audit("Tutor Work Completed", "Tutor", st.session_state.username, selected["University_ID"], department, semester,
-                  f"Tutor={tutor_name.strip()}; Student Credit={credit_10:.2f}/10; Prediction={prediction}; Salary eligible=Yes")
-            st.success(f"✅ Marks saved • Automatic Prediction: **{prediction}** • Overall Student Credit: **{credit_10:.2f}/10** • 🟢 Tutor work COMPLETED")
+                  f"Tutor={tutor_name.strip()}; Earned Credits={total_credits}; Prediction={prediction}; Salary eligible=Yes")
+            st.success(f"✅ Marks saved • Automatic Prediction: **{prediction}** • Earned Credits: **{total_credits}** • 🟢 Tutor work COMPLETED")
         else:
             audit("Tutor Work Saved - Pending Completion", "Tutor", st.session_state.username, selected["University_ID"], department, semester,
-                  f"Tutor={tutor_name.strip()}; Student Credit={credit_10:.2f}/10; Prediction={prediction}; Salary eligible=No")
-            st.success(f"✅ Marks saved • Automatic Prediction: **{prediction}** • Overall Student Credit: **{credit_10:.2f}/10** • 🟡 Pending")
+                  f"Tutor={tutor_name.strip()}; Earned Credits={total_credits}; Prediction={prediction}; Salary eligible=No")
+            st.success(f"✅ Marks saved • Automatic Prediction: **{prediction}** • Earned Credits: **{total_credits}** • 🟡 Pending")
         st.rerun()
 
 
@@ -1775,13 +1804,12 @@ def tutor_profile_tab():
     st.subheader("👨‍🏫 Tutor Profile"); profile=get_tutor_profile(st.session_state.username)
     with st.form("tutor_profile_form"):
         tutor_name=st.text_input("Tutor Name",value=str(profile.get("Tutor_Name","")),placeholder="Enter tutor full name")
-        score=st.number_input("Tutor Credit Score /10",0.0,10.0,float(profile.get("Credit_Score",0)),0.1)
         save=st.form_submit_button("💾 Save Tutor Details",type="primary")
     if save:
         if not tutor_name.strip(): st.error("Enter tutor name."); return
-        save_tutor_profile(st.session_state.username,tutor_name,st.session_state.teacher_department,score)
-        audit("Tutor Profile Updated","Tutor",st.session_state.username,"",st.session_state.teacher_department,"",f"Tutor={tutor_name}; Credit={score}/10")
-        st.success("✅ Tutor name and credit score saved.")
+        save_tutor_profile(st.session_state.username,tutor_name,st.session_state.teacher_department,0.0)
+        audit("Tutor Profile Updated","Tutor",st.session_state.username,"",st.session_state.teacher_department,"",f"Tutor={tutor_name}")
+        st.success("✅ Tutor name saved.")
 
 def teacher_dashboard():
     app_brand()
@@ -1789,7 +1817,7 @@ def teacher_dashboard():
     st.title("👨‍🏫 Tutor Dashboard")
     tutor_profile=get_tutor_profile(st.session_state.username)
     tutor_display=tutor_profile.get("Tutor_Name") or st.session_state.username
-    st.info(f"Tutor: **{tutor_display}**  •  Department: **{assigned_department}**  •  Credit: **{float(tutor_profile.get('Credit_Score',0)):.1f}/10**")
+    st.info(f"Tutor: **{tutor_display}**  •  Department: **{assigned_department}**")
     c1,c2,c3 = st.columns([2.2,1.0,0.8])
     department = c1.selectbox("🎓 B.Tech Department", DEPARTMENTS, index=DEPARTMENTS.index(assigned_department), key="dashboard_department")
     semester = c2.selectbox("📚 Semester", SEMESTERS, index=2, key="dashboard_semester")
@@ -1905,8 +1933,9 @@ def student_dashboard():
 
     subjects=parse_subjects(st.session_state.student_report["Subjects_JSON"])
     overall=float(np.mean([x["Overall"] for x in subjects])) if subjects else 0
-    tutor_credit=float(np.mean([float(x.get("Tutor_Credit_10", overall/10)) for x in subjects])) if subjects else 0.0
-    tutor_prediction=str(subjects[0].get("Automatic_Prediction", automatic_prediction(tutor_credit))) if subjects else automatic_prediction(tutor_credit)
+    total_credits, earned_credit_subjects = calculate_total_credits(subjects)
+    max_credits = sum(SUBJECT_CREDITS[:len(subjects)])
+    tutor_prediction=str(subjects[0].get("Automatic_Prediction", automatic_prediction(overall/10))) if subjects else automatic_prediction(overall/10)
     if any(float(x.get("Study_Hours",0))>0 for x in subjects):
         if overall>=80:
             st.balloons(); st.markdown(f'<div class="good-pop"><div style="font-size:3rem">🎉🏆</div><h2>Good Performance</h2><p>Keep your consistency. Overall score: <b>{overall:.2f}%</b></p></div>',unsafe_allow_html=True)
@@ -1920,13 +1949,20 @@ def student_dashboard():
         status="Good" if overall>=80 else "Above Average" if overall>=65 else "Average" if overall>=50 else "Needs Improvement"
         c.markdown(f'<div class="metric-card"><div class="label">Status</div><div class="value">{status}</div></div>',unsafe_allow_html=True)
         d1,d2=st.columns(2)
-        d1.markdown(f'<div class="metric-card"><div class="label">Tutor Overall Credit</div><div class="value">{tutor_credit:.2f}/10</div></div>',unsafe_allow_html=True)
+        d1.markdown(f'<div class="metric-card"><div class="label">🎓 Total Earned Credits</div><div class="value">{total_credits}/{max_credits}</div></div>',unsafe_allow_html=True)
         d2.markdown(f'<div class="metric-card"><div class="label">Automatic Prediction</div><div class="value">{tutor_prediction}</div></div>',unsafe_allow_html=True)
+        if earned_credit_subjects:
+            st.success("✅ Credits earned: " + ", ".join(earned_credit_subjects))
+        else:
+            st.warning("⚠️ No subject credit earned yet. A subject gives credit only when its score is 40% or above.")
         rows=[]
         for x in subjects:
-            rows.append([x["Subject"],f"{x['Attendance']:.0f}%",f"{x.get('Attendance_Mark',attendance_mark(x['Attendance']))}/5",f"{x['Internal']:.0f}/40",f"{x['Assignment']:.0f}/15",f"{x['Previous']:.0f}/60",f"{x['Study_Hours']:.1f} h",f"{x['Overall']:.1f}%",f"{x.get('Circle',performance_circle(x['Level']))} {x['Level']}"])
+            idx = subjects.index(x)
+            subject_credit = SUBJECT_CREDITS[idx] if idx < len(SUBJECT_CREDITS) else 0
+            passed = subject_passed(x)
+            rows.append([x["Subject"],f"{x['Attendance']:.0f}%",f"{x.get('Attendance_Mark',attendance_mark(x['Attendance']))}/5",f"{x['Internal']:.0f}/40",f"{x['Assignment']:.0f}/15",f"{x['Previous']:.0f}/60",f"{x['Study_Hours']:.1f} h",f"{x['Overall']:.1f}%", "PASS" if passed else "NOT PASS", f"{subject_credit if passed else 0} cr",f"{x.get('Circle',performance_circle(x['Level']))} {x['Level']}"])
         st.subheader("📊 Subject-wise Result")
-        st.dataframe(pd.DataFrame(rows,columns=["Subject","Attendance","Att. Mark","Internal","Assignment","Previous","Study","Score","Performance"]),use_container_width=True,hide_index=True)
+        st.dataframe(pd.DataFrame(rows,columns=["Subject","Attendance","Att. Mark","Internal","Assignment","Previous","Study","Score","Pass","Credit","Performance"]),use_container_width=True,hide_index=True)
         st.subheader("🎯 Improvement")
         for x in subjects:
             with st.expander(f"{x.get('Circle',performance_circle(x['Level']))} {x['Subject']} — {x['Level']} — {x['Overall']:.1f}%"):
