@@ -469,49 +469,50 @@ def upsert_report(report):
     sync_marks_to_supabase(report)
 
 
-def delete_student(uid, department, semester="", tutor_username=""):
-    """Delete the selected student's local registration + marks and shared records.
-    This is intentionally keyed by the selected University ID, with department/semester
-    used as additional filters where applicable.
+def delete_student(uid, department="", semester="", tutor_username=""):
+    """Permanently remove ONE selected student and all linked local/cloud details.
+
+    The deletion is keyed by University ID only so a tutor's delete action
+    removes the student's registration, marks, smart card and files across
+    every semester/department record belonging to that University ID.
     """
-    uid = str(uid).strip()
-    department = str(department).strip()
-    semester = str(semester).strip().upper()
+    uid = str(uid or "").strip()
+    if not uid:
+        return False
 
-    # Delete local marks/report for the selected student.
+    # Local marks/reports: remove every record for this student.
     df = load_reports()
-    if not df.empty:
-        mask = df["University_ID"].astype(str).eq(uid)
-        if department:
-            mask &= df["Department"].astype(str).eq(department)
-        if semester:
-            mask &= df["Semester"].astype(str).str.upper().eq(semester)
-        save_reports(df.loc[~mask].copy())
+    if not df.empty and "University_ID" in df.columns:
+        save_reports(df.loc[~df["University_ID"].astype(str).eq(uid)].copy())
 
-    # Delete local student registration/details.
+    # Local registration: remove every registration row for this student.
     reg = load_registrations()
-    if not reg.empty:
-        rmask = reg["University_ID"].astype(str).eq(uid)
-        if department:
-            rmask &= reg["Department"].astype(str).eq(department)
-        if semester:
-            rmask &= reg["Semester"].astype(str).str.upper().eq(semester)
-        save_registrations(reg.loc[~rmask].copy())
+    if not reg.empty and "University_ID" in reg.columns:
+        save_registrations(reg.loc[~reg["University_ID"].astype(str).eq(uid)].copy())
 
-    # Remove the shared student/marks/card records so Principal no longer sees
-    # the deleted student's details. Failures are swallowed so a temporary
-    # Supabase issue does not crash the Tutor + Student application.
+    # Remove shared Supabase records. Each operation is isolated so one
+    # missing/optional table cannot crash the Tutor + Student portal.
+    cloud_errors = []
     try:
         sb = _get_shared_supabase()
         if sb is not None:
-            sb.table("student_marks").delete().eq("university_id", uid).execute()
-            sb.table("students").delete().eq("university_id", uid).execute()
-            # Smart Card belongs to the same student; remove it with the student.
-            sb.table("smart_cards").delete().eq("university_id", uid).execute()
-    except Exception:
-        pass
+            for table in ("student_marks", "student_files"):
+                try:
+                    sb.table(table).delete().eq("university_id", uid).execute()
+                except Exception as exc:
+                    cloud_errors.append(f"{table}: {exc}")
+            try:
+                sb.table("smart_cards").delete().eq("university_id", uid).execute()
+            except Exception as exc:
+                cloud_errors.append(f"smart_cards: {exc}")
+            try:
+                sb.table("students").delete().eq("university_id", uid).execute()
+            except Exception as exc:
+                cloud_errors.append(f"students: {exc}")
+    except Exception as exc:
+        cloud_errors.append(str(exc))
 
-    # Remove locally stored profile files for this student when possible.
+    # Remove locally stored profile files.
     try:
         files = get_student_files(uid)
         for path in files:
@@ -524,16 +525,15 @@ def delete_student(uid, department, semester="", tutor_username=""):
         pass
 
     audit(
-        "Student Details + Marks Deleted",
+        "Student Permanently Deleted",
         "Tutor",
         tutor_username or st.session_state.get("username", ""),
         uid,
         department,
         semester,
-        "Selected student registration, marks and linked records deleted by tutor."
+        "Tutor deleted the selected student's registration, marks, Smart Card and linked files."
     )
-
-
+    return True
 
 
 def get_subjects(department, semester):
@@ -1887,7 +1887,7 @@ def teacher_dashboard():
         st.error(f"No complete 6-subject mapping is configured for **{department} — {semester}**.")
         return
     st.success(f"📖 Active curriculum: **{department} — {semester}**")
-    tabs = st.tabs(["📝 Registration","📊 Mark Entry","📎 Student Files","👥 Records","📈 K-Means","👨‍🏫 Tutor Profile"])
+    tabs = st.tabs(["📝 Registration","📊 Mark Entry","📎 Student Files","👥 Records","📈 K-Means","👨‍🏫 Tutor Profile","🗑️ Delete Student"])
     with tabs[0]: tutor_registration_form(department, semester)
     with tabs[1]: tutor_mark_entry(department, semester)
     with tabs[2]: tutor_student_files(department, semester)
@@ -1908,20 +1908,11 @@ def teacher_dashboard():
             st.metric("Selected Student Overall",f"{overall:.2f}%")
             rows=[[x["Subject"],x["Attendance"],x["Internal"],x["Assignment"],x["Previous"],x["Overall"],x["Level"]] for x in subs]
             st.dataframe(pd.DataFrame(rows,columns=["Subject","Attendance","Internal","Assignment","Previous","Score","Performance"]),use_container_width=True,hide_index=True)
-            c1,c2,c3=st.columns(3)
+            c1,c2=st.columns(2)
             c1.download_button("📥 Download Progress PDF",create_pdf(row),f"{selected}_Progress_Report.pdf","application/pdf",use_container_width=True)
             card=create_student_card_png(row)
             if card:
                 c2.download_button("🪪 Download Student Card",card,f"{selected}_Student_Card.png","image/png",use_container_width=True)
-            if c3.button("🗑️ Delete Selected Student", use_container_width=True, type="secondary"):
-                delete_student(
-                    selected,
-                    department,
-                    semester,
-                    st.session_state.get("username", "")
-                )
-                st.success(f"✅ Student {selected} details and marks were deleted.")
-                st.rerun()
     with tabs[4]:
         st.subheader(f"📈 K-Means Analysis — {department} — {semester}")
         result=kmeans_analysis(department)
@@ -1938,6 +1929,27 @@ def teacher_dashboard():
             st.dataframe(pd.DataFrame(result["centroids"]),use_container_width=True,hide_index=True)
             st.download_button("📊 Download K-Means Analysis PDF",create_kmeans_pdf(result),f"{department.replace(' ','_')}_KMeans_Analysis.pdf","application/pdf",use_container_width=True,type="primary")
     with tabs[5]: tutor_profile_tab()
+    with tabs[6]:
+        st.subheader("🗑️ Delete Registered Student")
+        st.warning("This is the separate student-deletion page. Select ONE student, then delete that student's complete details. This action removes registration, marks, Smart Card and linked files.")
+        reg = load_registrations()
+        if reg.empty:
+            st.info("No registered students are available to delete.")
+        else:
+            reg = reg.copy()
+            reg["University_ID"] = reg["University_ID"].astype(str)
+            # Show all registered students, not only students with marks.
+            reg = reg.drop_duplicates(subset=["University_ID"], keep="last")
+            labels = {f"{r['University_ID']} — {r['Student_Name']}": r for _, r in reg.iterrows()}
+            label = st.selectbox("Select one registered student", list(labels.keys()), key="delete_registered_student")
+            selected_student = labels[label]
+            st.markdown(f"**Student:** {selected_student['Student_Name']}  \n**University ID:** {selected_student['University_ID']}  \n**Department:** {selected_student['Department']}  \n**Semester:** {selected_student['Semester']}")
+            confirm = st.checkbox("I confirm that I want to permanently delete this student's complete details.", key="confirm_delete_student")
+            if st.button("🗑️ Delete This Student Completely", type="primary", use_container_width=True, disabled=not confirm):
+                uid = str(selected_student["University_ID"])
+                delete_student(uid, str(selected_student.get("Department", department)), str(selected_student.get("Semester", semester)), st.session_state.get("username", ""))
+                st.success(f"✅ {uid} and all linked student details were deleted.")
+                st.rerun()
 
 # ============================================================
 # STUDENT WORKFLOW
