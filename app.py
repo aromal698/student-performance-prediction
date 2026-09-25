@@ -496,6 +496,12 @@ def delete_student(uid, department="", semester="", tutor_username=""):
     try:
         sb = _get_shared_supabase()
         if sb is not None:
+            # Remove all previous Tutor/Principal activity for this student so
+            # the Principal dashboard no longer shows deleted student records.
+            try:
+                sb.table("audit_logs").delete().eq("university_id", uid).execute()
+            except Exception as exc:
+                cloud_errors.append(f"audit_logs: {exc}")
             for table in ("student_marks", "student_files"):
                 try:
                     sb.table(table).delete().eq("university_id", uid).execute()
