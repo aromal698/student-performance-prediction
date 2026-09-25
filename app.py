@@ -315,6 +315,11 @@ def load_registrations():
         for col in REGISTRATION_COLUMNS:
             if col not in df.columns:
                 df[col] = ""
+        # Backward compatibility: old files may have a Username column.
+        # It is never requested from users now; internally use University ID.
+        if "University_ID" in df.columns:
+            mask = df["Username"].astype(str).str.strip().eq("")
+            df.loc[mask, "Username"] = df.loc[mask, "University_ID"].astype(str)
         return df[REGISTRATION_COLUMNS]
     except Exception:
         return empty_registration_df()
@@ -342,22 +347,20 @@ def log_action(role, username, action, university_id="", department="", semester
     except Exception:
         pass
 
-def register_student(username, uid, name, department, semester, tutor_username):
-    username, uid, name = username.strip(), uid.strip(), name.strip()
+def register_student(uid, name, department, semester, tutor_username):
+    uid, name = str(uid).strip(), str(name).strip()
     department, semester, tutor_username = department.strip(), semester.strip().upper(), tutor_username.strip()
     df = load_registrations()
-    if not username or not uid or not name or not department or not semester:
-        return False, "Enter Username, University ID, Student Name, Department and Semester."
+    if not uid or not name or not department or not semester:
+        return False, "Enter University ID, Student Name, Department and Semester."
     if department not in DEPARTMENTS or semester not in SEMESTERS:
         return False, "Select a valid B.Tech Department and Semester."
-    duplicate = df[
-        df["University_ID"].astype(str).str.strip().str.lower().eq(uid.lower()) |
-        df["Username"].astype(str).str.strip().str.lower().eq(username.lower())
-    ]
+    duplicate = df[df["University_ID"].astype(str).str.strip().str.lower().eq(uid.lower())]
     if not duplicate.empty:
-        return False, "This Username or University ID is already registered."
+        return False, "This University ID is already registered."
     row = pd.DataFrame([{
-        "Username": username, "University_ID": uid, "Student_Name": name,
+        "Username": uid,  # internal compatibility only; never shown/entered by the student
+        "University_ID": uid, "Student_Name": name,
         "Department": department, "Semester": semester,
         "Tutor_Username": tutor_username,
         "Registered_Time": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -366,21 +369,17 @@ def register_student(username, uid, name, department, semester, tutor_username):
     log_action("Tutor", tutor_username, "Student Registration", uid, department, semester, f"Registered {name}")
     return True, f"Student {name} registered successfully for {department} — {semester}."
 
+
 def find_registered_student(uid):
     df = load_registrations()
     if df.empty: return None
     found = df[df["University_ID"].astype(str).str.strip().str.lower().eq(str(uid).strip().lower())]
     return found.iloc[-1].to_dict() if not found.empty else None
 
-def find_registered_credentials(username, uid):
-    """Find a tutor-registered student using both Username and University ID."""
-    df = load_registrations()
-    if df.empty: return None
-    found = df[
-        df["Username"].astype(str).str.strip().str.lower().eq(str(username).strip().lower()) &
-        df["University_ID"].astype(str).str.strip().str.lower().eq(str(uid).strip().lower())
-    ]
-    return found.iloc[-1].to_dict() if not found.empty else None
+def find_registered_credentials(uid):
+    """Find a tutor-registered student using University ID only."""
+    return find_registered_student(uid)
+
 
 def load_reports():
     if not os.path.exists(REPORT_FILE):
@@ -720,8 +719,11 @@ def normalize_subject(data):
 
 
 def make_report(username, name, uid, semester, department, subjects):
+    # Username is retained internally for compatibility with older CSV files.
+    # The user-facing Student/Tutor workflow uses University ID only.
+    internal_id = str(uid).strip()
     return {
-        "Username": username.strip(),
+        "Username": internal_id,
         "Student_Name": name.strip(),
         "University_ID": uid.strip(),
         "Semester": semester,
@@ -735,17 +737,13 @@ def find_student(username, uid):
     df = load_reports()
     if df.empty:
         return None
-    found = df[
-        df["Username"].astype(str).str.lower().eq(username.strip().lower()) &
-        df["University_ID"].astype(str).str.lower().eq(uid.strip().lower())
-    ]
+    found = df[df["University_ID"].astype(str).str.lower().eq(str(uid).strip().lower())]
     if found.empty:
         return None
-    # The newest submission is the active student record, while older
-    # submissions remain permanently stored for history/analysis.
     if "Created_Time" in found.columns:
         found = found.sort_values("Created_Time")
     return found.iloc[-1].to_dict()
+
 
 # ============================================================
 # PDF
@@ -760,7 +758,6 @@ def create_pdf(report):
     story = [Paragraph("Student Performance Progress Report", title)]
     story += [
         Paragraph(f"<b>Name:</b> {report['Student_Name']}", styles["Normal"]),
-        Paragraph(f"<b>Username:</b> {report['Username']}", styles["Normal"]),
         Paragraph(f"<b>University ID:</b> {report['University_ID']}", styles["Normal"]),
         Paragraph(f"<b>Semester:</b> {report['Semester']}", styles["Normal"]),
         Paragraph(f"<b>Department:</b> {report['Department']}", styles["Normal"]),
@@ -1169,7 +1166,7 @@ def all_department_dashboard():
 # CSV TEMPLATE / IMPORT
 # ============================================================
 def template_df():
-    cols = ["Username", "Student_Name", "University_ID", "Semester", "Department"]
+    cols = ["Student_Name", "University_ID", "Semester", "Department"]
     for i in range(1, 7):
         cols += [f"Subject_{i}", f"Attendance_{i}", f"Internal_{i}", f"Assignment_{i}", f"Previous_{i}"]
     return pd.DataFrame(columns=cols)
@@ -1177,7 +1174,7 @@ def template_df():
 
 def uploaded_to_reports(uploaded_file, tutor_department):
     df = pd.read_csv(uploaded_file)
-    required = ["Username", "Student_Name", "University_ID", "Semester"]
+    required = ["Student_Name", "University_ID", "Semester"]
     missing = [c for c in required if c not in df.columns]
     if missing:
         raise ValueError("Missing required columns: " + ", ".join(missing))
@@ -1200,7 +1197,7 @@ def uploaded_to_reports(uploaded_file, tutor_department):
                 "Previous": row.get(f"Previous_{i}", 0),
             })
             values.append(item)
-        reports.append(make_report(row["Username"], row["Student_Name"], row["University_ID"], semester, tutor_department, values))
+        reports.append(make_report(row["University_ID"], row["Student_Name"], row["University_ID"], semester, tutor_department, values))
     return reports
 
 # ============================================================
@@ -1340,11 +1337,11 @@ def create_student_card_png(profile):
                            fill=None, outline=(120, 220, 255), width=2)
 
     f_title = _font(38, True)
-    f_small = _font(22)
-    f_bold = _font(28, True)
-    f_name = _font(34, True)
-    f_value = _font(25)
-    f_tiny = _font(18)
+    f_small = _font(26)
+    f_bold = _font(30, True)
+    f_name = _font(42, True)
+    f_value = _font(30)
+    f_tiny = _font(21)
 
     draw.text((62, 52), "EduPredict SPP", font=f_title, fill=(255, 255, 255))
     draw.text((W-365, 61), "STUDENT SMART CARD", font=f_small, fill=(220, 245, 255))
@@ -1389,8 +1386,8 @@ def create_student_card_png(profile):
     for x, y, label, value in cards:
         draw.rounded_rectangle((x, y, x+525, y+78), radius=16,
                                fill=(255, 255, 255), outline=(150, 220, 255), width=2)
-        draw.text((x+18, y+9), label, font=f_tiny, fill=(75, 105, 145))
-        draw.text((x+18, y+36), value, font=f_value, fill=(18, 35, 65))
+        draw.text((x+18, y+7), label, font=f_tiny, fill=(75, 105, 145))
+        draw.text((x+18, y+37), value, font=f_value, fill=(18, 35, 65))
 
     # Footer / authenticity line.
     draw.text((55, 650), "EduPredict SPP  •  Student Performance Prediction", font=f_small, fill=(230, 245, 255))
@@ -1598,10 +1595,9 @@ def teacher_login():
 
 
 def student_login():
-    login_shell("Student Login", "Use the Username and University ID registered by your tutor")
-    st.info("💡 Example: Username **Aromal kv**  •  University ID **SNM25CE001**  •  🔓 No password required")
+    login_shell("Student Login", "Use the University ID registered by your tutor")
+    st.info("💡 Enter the University ID registered by your tutor. No student username or password is required.")
     with st.form("student_login_form"):
-        username = st.text_input("👤 Username", placeholder="e.g. Aromal kv")
         uid = st.text_input("🪪 University ID", placeholder="e.g. SNM25CE001")
         c1, c2 = st.columns(2)
         login = c1.form_submit_button("🎓 Enter Student Portal", use_container_width=True, type="primary")
@@ -1609,24 +1605,22 @@ def student_login():
     if back:
         st.session_state.page = "home"; st.rerun()
     if login:
-        registered = find_registered_credentials(username, uid)
+        registered = find_registered_credentials(uid)
         if not registered:
-            st.error("❌ No tutor-registered profile found. Check your Username and University ID, or contact your tutor.")
+            st.error("❌ No tutor-registered profile found for this University ID. Contact your tutor.")
             return
-        latest_report = find_student(registered["Username"], registered["University_ID"])
+        latest_report = find_student("", registered["University_ID"])
         st.session_state.logged_in = True
         st.session_state.role = "student"
-        st.session_state.username = str(registered["Username"]).strip()
+        st.session_state.username = str(registered["University_ID"]).strip()
         st.session_state.student_profile = registered
         st.session_state.student_report = latest_report
         st.session_state.student_result_calculated = False
-        log_action("Student", st.session_state.username, "Student Login", registered["University_ID"], registered.get("Department", ""), registered.get("Semester", ""), "Student portal login")
+        log_action("Student", st.session_state.username, "Student Login", registered["University_ID"], registered.get("Department",""), registered.get("Semester",""), "Successful student login")
         st.session_state.page = "student_dashboard"
         st.rerun()
 
-# ============================================================
-# K-MEANS TUTOR ANALYSIS
-# ============================================================
+
 def kmeans_analysis(department):
     """Robust K-Means tutor analysis. Handles 0, 1 and many records safely."""
     if not SKLEARN_AVAILABLE:
@@ -1753,16 +1747,15 @@ def tutor_portal():
     if st.session_state.get("teacher_menu_view") == "registration":
         st.subheader("🧑‍🎓 Register Student Profile")
         st.success(f"🏫 Tutor department locked to: **{assigned_department}**")
-        st.caption("✨ Every registration creates a portal identity. Students later sign in with Username + University ID only.")
+        st.caption("✨ Every registration creates a portal identity. Students sign in using University ID only.")
         with st.form("student_registration_form"):
-            username = st.text_input("👤 Student Username", placeholder="e.g. Aromal kv")
-            uid = st.text_input("🪪 University ID", placeholder="e.g. SNM25CE001")
-            name = st.text_input("📛 Student Name", placeholder="e.g. Aromal K V")
+            uid = st.text_input("🪪 University ID *", placeholder="e.g. SNM25CE001")
+            name = st.text_input("📛 Student Name *", placeholder="e.g. Aromal K V")
             semester = st.selectbox("📚 Student Semester", SEMESTERS)
-            st.caption("🔒 Department is controlled by your tutor account.")
+            st.caption("🔒 Department is controlled by your tutor account. Student username is not required.")
             submitted = st.form_submit_button("🚀 Submit Registration", use_container_width=True, type="primary")
         if submitted:
-            ok, msg = register_student(username, uid, name, assigned_department, semester, st.session_state.get("username", ""))
+            ok, msg = register_student(uid, name, assigned_department, semester, st.session_state.get("username", ""))
             (st.success if ok else st.error)(msg)
         reg = load_registrations()
         mine = reg[reg["Department"].astype(str).eq(str(assigned_department))] if not reg.empty else reg
@@ -1808,11 +1801,11 @@ def manual_add_form(department, semester):
     ).tolist()
 
     with st.form(f"add_student_{re.sub(r'[^a-zA-Z0-9]', '_', department)}_{semester}"):
-        selected_student = st.selectbox("Registered Student (University ID — Name)", registered_display)
+        selected_student = st.selectbox("🟢 Active Registered Student — select one student", registered_display)
         selected_idx = registered_display.index(selected_student)
         reg_row = registered.iloc[selected_idx]
         uid = str(reg_row["University_ID"]).strip()
-        username = str(reg_row["Username"]).strip()
+        username = uid
         name = str(reg_row["Student_Name"]).strip()
         st.success(f"✅ Registered: **{name}**  •  University ID: **{uid}**")
 
@@ -1943,7 +1936,7 @@ def teacher_dashboard():
                     if not reg:
                         rejected.append(str(report.get("University_ID", "")))
                         continue
-                    if str(reg.get("Username", "")).strip().lower() != str(report.get("Username", "")).strip().lower() or str(reg.get("Student_Name", "")).strip().lower() != str(report.get("Student_Name", "")).strip().lower():
+                    if str(reg.get("Student_Name", "")).strip().lower() != str(report.get("Student_Name", "")).strip().lower():
                         rejected.append(str(report.get("University_ID", "")))
                         continue
                     valid_reports.append(report)
@@ -1952,7 +1945,7 @@ def teacher_dashboard():
                         upsert_report(report)
                     st.success(f"✅ {len(valid_reports)} registered student record(s) uploaded successfully.")
                 if rejected:
-                    st.warning("⚠️ These rows were skipped because the student is not registered or the Username/Name does not match: " + ", ".join(rejected))
+                    st.warning("⚠️ These rows were skipped because the student is not registered or the Student Name does not match: " + ", ".join(rejected))
                 if not reports:
                     st.warning("No valid student rows were found in the CSV.")
             except Exception as exc:
