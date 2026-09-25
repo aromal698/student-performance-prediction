@@ -315,11 +315,6 @@ def load_registrations():
         for col in REGISTRATION_COLUMNS:
             if col not in df.columns:
                 df[col] = ""
-        # Backward compatibility: old files may have a Username column.
-        # It is never requested from users now; internally use University ID.
-        if "University_ID" in df.columns:
-            mask = df["Username"].astype(str).str.strip().eq("")
-            df.loc[mask, "Username"] = df.loc[mask, "University_ID"].astype(str)
         return df[REGISTRATION_COLUMNS]
     except Exception:
         return empty_registration_df()
@@ -347,20 +342,22 @@ def log_action(role, username, action, university_id="", department="", semester
     except Exception:
         pass
 
-def register_student(uid, name, department, semester, tutor_username):
-    uid, name = str(uid).strip(), str(name).strip()
+def register_student(username, uid, name, department, semester, tutor_username):
+    username, uid, name = username.strip(), uid.strip(), name.strip()
     department, semester, tutor_username = department.strip(), semester.strip().upper(), tutor_username.strip()
     df = load_registrations()
-    if not uid or not name or not department or not semester:
-        return False, "Enter University ID, Student Name, Department and Semester."
+    if not username or not uid or not name or not department or not semester:
+        return False, "Enter Username, University ID, Student Name, Department and Semester."
     if department not in DEPARTMENTS or semester not in SEMESTERS:
         return False, "Select a valid B.Tech Department and Semester."
-    duplicate = df[df["University_ID"].astype(str).str.strip().str.lower().eq(uid.lower())]
+    duplicate = df[
+        df["University_ID"].astype(str).str.strip().str.lower().eq(uid.lower()) |
+        df["Username"].astype(str).str.strip().str.lower().eq(username.lower())
+    ]
     if not duplicate.empty:
-        return False, "This University ID is already registered."
+        return False, "This Username or University ID is already registered."
     row = pd.DataFrame([{
-        "Username": uid,  # internal compatibility only; never shown/entered by the student
-        "University_ID": uid, "Student_Name": name,
+        "Username": username, "University_ID": uid, "Student_Name": name,
         "Department": department, "Semester": semester,
         "Tutor_Username": tutor_username,
         "Registered_Time": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -369,17 +366,21 @@ def register_student(uid, name, department, semester, tutor_username):
     log_action("Tutor", tutor_username, "Student Registration", uid, department, semester, f"Registered {name}")
     return True, f"Student {name} registered successfully for {department} — {semester}."
 
-
 def find_registered_student(uid):
     df = load_registrations()
     if df.empty: return None
     found = df[df["University_ID"].astype(str).str.strip().str.lower().eq(str(uid).strip().lower())]
     return found.iloc[-1].to_dict() if not found.empty else None
 
-def find_registered_credentials(uid):
-    """Find a tutor-registered student using University ID only."""
-    return find_registered_student(uid)
-
+def find_registered_credentials(username, uid):
+    """Find a tutor-registered student using both Username and University ID."""
+    df = load_registrations()
+    if df.empty: return None
+    found = df[
+        df["Username"].astype(str).str.strip().str.lower().eq(str(username).strip().lower()) &
+        df["University_ID"].astype(str).str.strip().str.lower().eq(str(uid).strip().lower())
+    ]
+    return found.iloc[-1].to_dict() if not found.empty else None
 
 def load_reports():
     if not os.path.exists(REPORT_FILE):
@@ -533,6 +534,24 @@ def attendance_mark(attendance):
         return 1
     return 0
 
+
+def tutor_overall_credit_10(subjects):
+    """Compress tutor-entered marks into one academic credit out of 10.
+    Study hours are intentionally excluded here because they are entered by the student later.
+    """
+    scores = []
+    for item in subjects or []:
+        att = float(item.get("Attendance_Mark", attendance_mark(item.get("Attendance", 0)))) / 5 * 100
+        internal = float(item.get("Internal", 0)) / 40 * 100
+        assignment = float(item.get("Assignment", 0)) / 15 * 100
+        previous = float(item.get("Previous", 0)) / 60 * 100
+        scores.append(np.mean([att, internal, assignment, previous]))
+    return round(float(np.mean(scores)) / 10, 2) if scores else 0.0
+
+def completed_tutor_audit(tutor_name, university_id, department, semester, completed, credit_10):
+    action = "Tutor Work Completed" if completed else "Tutor Work Saved - Pending Completion"
+    detail = f"Tutor: {tutor_name}; Student: {university_id}; Overall Student Credit: {credit_10:.2f}/10; Completed: {'Yes' if completed else 'No'}"
+    log_action("Tutor", tutor_name, action, university_id, department, semester, detail)
 
 def performance_circle(level):
     return {
@@ -702,7 +721,7 @@ def normalize_subject(data):
     if not recommendations:
         recommendations.append("Maintain the current routine and continue regular revision and practice.")
 
-    return {
+    result = {
         "Subject": data["Subject"],
         "Attendance": attendance,
         "Attendance_Mark": att_mark,
@@ -716,14 +735,16 @@ def normalize_subject(data):
         "Recommendations": recommendations,
         "Compliment": complements[0],
     }
+    # Preserve tutor workflow metadata when the student later recalculates.
+    for key in ("Tutor_Name", "Tutor_Credit_10", "Tutor_Completed"):
+        if key in data:
+            result[key] = data[key]
+    return result
 
 
 def make_report(username, name, uid, semester, department, subjects):
-    # Username is retained internally for compatibility with older CSV files.
-    # The user-facing Student/Tutor workflow uses University ID only.
-    internal_id = str(uid).strip()
     return {
-        "Username": internal_id,
+        "Username": username.strip(),
         "Student_Name": name.strip(),
         "University_ID": uid.strip(),
         "Semester": semester,
@@ -737,13 +758,17 @@ def find_student(username, uid):
     df = load_reports()
     if df.empty:
         return None
-    found = df[df["University_ID"].astype(str).str.lower().eq(str(uid).strip().lower())]
+    found = df[
+        df["Username"].astype(str).str.lower().eq(username.strip().lower()) &
+        df["University_ID"].astype(str).str.lower().eq(uid.strip().lower())
+    ]
     if found.empty:
         return None
+    # The newest submission is the active student record, while older
+    # submissions remain permanently stored for history/analysis.
     if "Created_Time" in found.columns:
         found = found.sort_values("Created_Time")
     return found.iloc[-1].to_dict()
-
 
 # ============================================================
 # PDF
@@ -758,6 +783,7 @@ def create_pdf(report):
     story = [Paragraph("Student Performance Progress Report", title)]
     story += [
         Paragraph(f"<b>Name:</b> {report['Student_Name']}", styles["Normal"]),
+        Paragraph(f"<b>Username:</b> {report['Username']}", styles["Normal"]),
         Paragraph(f"<b>University ID:</b> {report['University_ID']}", styles["Normal"]),
         Paragraph(f"<b>Semester:</b> {report['Semester']}", styles["Normal"]),
         Paragraph(f"<b>Department:</b> {report['Department']}", styles["Normal"]),
@@ -1166,7 +1192,7 @@ def all_department_dashboard():
 # CSV TEMPLATE / IMPORT
 # ============================================================
 def template_df():
-    cols = ["Student_Name", "University_ID", "Semester", "Department"]
+    cols = ["Username", "Student_Name", "University_ID", "Semester", "Department"]
     for i in range(1, 7):
         cols += [f"Subject_{i}", f"Attendance_{i}", f"Internal_{i}", f"Assignment_{i}", f"Previous_{i}"]
     return pd.DataFrame(columns=cols)
@@ -1174,7 +1200,7 @@ def template_df():
 
 def uploaded_to_reports(uploaded_file, tutor_department):
     df = pd.read_csv(uploaded_file)
-    required = ["Student_Name", "University_ID", "Semester"]
+    required = ["Username", "Student_Name", "University_ID", "Semester"]
     missing = [c for c in required if c not in df.columns]
     if missing:
         raise ValueError("Missing required columns: " + ", ".join(missing))
@@ -1197,7 +1223,7 @@ def uploaded_to_reports(uploaded_file, tutor_department):
                 "Previous": row.get(f"Previous_{i}", 0),
             })
             values.append(item)
-        reports.append(make_report(row["University_ID"], row["Student_Name"], row["University_ID"], semester, tutor_department, values))
+        reports.append(make_report(row["Username"], row["Student_Name"], row["University_ID"], semester, tutor_department, values))
     return reports
 
 # ============================================================
@@ -1209,30 +1235,6 @@ SMART_CARD_COLUMNS = [
     "University_Name", "University_ID", "Submitted_Time"
 ]
 
-# University list used by the Smart Card form.  "Other / Not Listed" lets
-# students enter a university that is not in the list.
-UNIVERSITY_OPTIONS = [
-    "APJ Abdul Kalam Technological University (KTU)",
-    "University of Kerala",
-    "Mahatma Gandhi University (MGU)",
-    "University of Calicut",
-    "Kannur University",
-    "Cochin University of Science and Technology (CUSAT)",
-    "Kerala University of Fisheries and Ocean Studies (KUFOS)",
-    "Kerala Agricultural University (KAU)",
-    "National University of Advanced Legal Studies (NUALS)",
-    "Indian Institute of Technology Palakkad (IIT Palakkad)",
-    "Indian Institute of Space Science and Technology (IIST)",
-    "Amrita Vishwa Vidyapeetham",
-    "Rajagiri School of Engineering & Technology",
-    "Federal Institute of Science and Technology (FISAT)",
-    "SCMS School of Engineering and Technology",
-    "Other / Not Listed",
-]
-
-BLOOD_GROUPS = ["A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"]
-
-
 def load_smart_cards():
     if not os.path.exists(SMART_CARD_FILE):
         return pd.DataFrame(columns=SMART_CARD_COLUMNS)
@@ -1243,272 +1245,113 @@ def load_smart_cards():
                 df[col] = ""
         return df[SMART_CARD_COLUMNS]
     except Exception:
-        # A damaged/empty CSV must not crash the Student site.
         return pd.DataFrame(columns=SMART_CARD_COLUMNS)
 
-
 def save_smart_card(row):
-    """Insert or update a Smart Card record safely."""
-    os.makedirs(DATA_DIR, exist_ok=True)
     df = load_smart_cards()
-    row = {col: str(row.get(col, "")) for col in SMART_CARD_COLUMNS}
-    reg_id = row["Registration_ID"].strip().upper()
-    uid = row["University_ID"].strip().upper()
-
-    if not df.empty:
-        if reg_id:
-            df = df[df["Registration_ID"].astype(str).str.strip().str.upper() != reg_id]
-        if uid:
-            df = df[df["University_ID"].astype(str).str.strip().str.upper() != uid]
-
+    reg_id = str(row.get("Registration_ID", "")).strip()
+    if reg_id and not df.empty:
+        df = df[df["Registration_ID"].astype(str).str.strip() != reg_id]
     df = pd.concat([df, pd.DataFrame([row], columns=SMART_CARD_COLUMNS)], ignore_index=True)
     df.to_csv(SMART_CARD_FILE, index=False)
 
-
-def _font(size, bold=False):
-    if not PIL_AVAILABLE:
-        return ImageFont.load_default()
-    names = [
-        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf" if bold else "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-        "DejaVuSans-Bold.ttf" if bold else "DejaVuSans.ttf",
-    ]
-    for name in names:
-        try:
-            return ImageFont.truetype(name, size)
-        except Exception:
-            pass
-    return ImageFont.load_default()
-
-
-def _fit_text(draw, text, font, max_width):
-    """Shorten text safely so long university/college names never overflow."""
-    text = str(text or "").strip()
-    if not text:
-        return "—"
-    if draw.textbbox((0, 0), text, font=font)[2] <= max_width:
-        return text
-    while len(text) > 3 and draw.textbbox((0, 0), text + "…", font=font)[2] > max_width:
-        text = text[:-1]
-    return text + "…"
-
-
 def create_student_card_png(profile):
-    """Create a polished, self-contained ATM-style Smart Card PNG."""
+    """Create a dependency-safe ATM-style PNG smart card."""
     if not PIL_AVAILABLE:
-        raise RuntimeError("Pillow is required. Add Pillow to requirements.txt.")
-
-    W, H = 1200, 760
-    img = Image.new("RGB", (W, H), (8, 15, 35))
-    draw = ImageDraw.Draw(img)
-
-    # Multi-stop premium gradient background.
-    stops = [
-        (0, (10, 28, 70)),
-        (W // 2, (30, 58, 125)),
-        (W, (76, 30, 115)),
-    ]
+        raise RuntimeError("Pillow is required for Smart Card PNG generation. Add Pillow to requirements.txt.")
+    W,H=1010,638
+    img=Image.new("RGB",(W,H),(15,23,42))
+    draw=ImageDraw.Draw(img)
+    # premium gradient
     for x in range(W):
-        for i in range(len(stops) - 1):
-            if stops[i][0] <= x <= stops[i + 1][0]:
-                x0, c0 = stops[i]; x1, c1 = stops[i + 1]
-                t = (x - x0) / max(1, x1 - x0)
-                c = tuple(int(c0[j] + (c1[j] - c0[j]) * t) for j in range(3))
-                break
-        draw.line((x, 0, x, H), fill=c)
-
-    # Soft decorative glow circles.
-    for cx, cy, r, fill in [
-        (1020, 95, 220, (90, 210, 255)),
-        (110, 680, 190, (120, 70, 255)),
-        (650, 360, 260, (255, 255, 255)),
-    ]:
-        layer = Image.new("RGBA", (W, H), (0, 0, 0, 0))
-        ld = ImageDraw.Draw(layer)
-        for rr in range(r, 5, -8):
-            alpha = max(0, int(2.0 * (r - rr)))
-            ld.ellipse((cx-rr, cy-rr, cx+rr, cy+rr), fill=(*fill, min(35, alpha)))
-        img = Image.alpha_composite(img.convert("RGBA"), layer).convert("RGB")
-        draw = ImageDraw.Draw(img)
-
-    # Outer card and inner glass panel.
-    draw.rounded_rectangle((18, 18, W-18, H-18), radius=42,
-                           fill=(255, 255, 255), outline=(255, 255, 255), width=3)
-    draw.rounded_rectangle((25, 25, W-25, H-25), radius=38,
-                           fill=None, outline=(120, 220, 255), width=2)
-
-    f_title = _font(38, True)
-    f_small = _font(26)
-    f_bold = _font(30, True)
-    f_name = _font(42, True)
-    f_value = _font(30)
-    f_tiny = _font(21)
-
-    draw.text((62, 52), "EduPredict SPP", font=f_title, fill=(255, 255, 255))
-    draw.text((W-365, 61), "STUDENT SMART CARD", font=f_small, fill=(220, 245, 255))
-    draw.text((W-365, 92), "ACADEMIC IDENTITY • 2026", font=f_tiny, fill=(180, 220, 245))
-
-    # Contactless-style symbol.
-    cx, cy = 1040, 185
-    for off in (0, 18, 36):
-        draw.arc((cx-55+off, cy-55+off, cx+55-off, cy+55-off), 210, 330,
-                 fill=(225, 250, 255), width=5)
-    draw.ellipse((cx-8, cy-8, cx+8, cy+8), fill=(225, 250, 255))
-
-    # Smart chip.
-    chip = (65, 150, 235, 275)
-    draw.rounded_rectangle(chip, radius=18, fill=(229, 194, 93), outline=(255, 245, 190), width=3)
-    for yy in (180, 212, 244):
-        draw.line((78, yy, 222, yy), fill=(150, 115, 40), width=3)
-    draw.line((145, 160, 145, 265), fill=(150, 115, 40), width=3)
-    draw.line((78, 228, 222, 228), fill=(150, 115, 40), width=3)
-
-    # Student identity.
-    name = _fit_text(draw, profile.get("Student_Name", ""), f_name, 660)
-    uid = _fit_text(draw, profile.get("University_ID", "") or "Not Provided", f_value, 660)
-    draw.text((285, 145), name, font=f_name, fill=(255, 255, 255))
-    draw.text((285, 197), f"University ID  •  {uid}", font=f_value, fill=(225, 242, 255))
-
-    # Information panels.
-    dept = _fit_text(draw, profile.get("Department", ""), f_value, 480)
-    college = _fit_text(draw, profile.get("Studied_College", ""), f_value, 480)
-    university = _fit_text(draw, profile.get("University_Name", ""), f_value, 480)
-    semester = str(profile.get("Semester", "") or "—")
-    reg = _fit_text(draw, profile.get("Registration_ID", ""), f_value, 480)
-
-    cards = [
-        (55, 325, "DEPARTMENT", dept),
-        (620, 325, "SEMESTER", semester),
-        (55, 420, "COLLEGE", college),
-        (620, 420, "REGISTRATION ID", reg),
-        (55, 515, "UNIVERSITY", university),
-        (620, 515, "BLOOD GROUP", str(profile.get("Blood_Group", "—"))),
-    ]
-    for x, y, label, value in cards:
-        draw.rounded_rectangle((x, y, x+525, y+78), radius=16,
-                               fill=(255, 255, 255), outline=(150, 220, 255), width=2)
-        draw.text((x+18, y+7), label, font=f_tiny, fill=(75, 105, 145))
-        draw.text((x+18, y+37), value, font=f_value, fill=(18, 35, 65))
-
-    # Footer / authenticity line.
-    draw.text((55, 650), "EduPredict SPP  •  Student Performance Prediction", font=f_small, fill=(230, 245, 255))
-    draw.text((W-355, 650), "SMART ID • VALID RECORD", font=f_tiny, fill=(190, 225, 245))
-    draw.line((55, 705, W-55, 705), fill=(150, 220, 255), width=2)
-    draw.text((55, 715), "Keep this card for academic identification", font=f_tiny, fill=(205, 230, 250))
-
+        t=x/(W-1)
+        r=int(20+45*t); g=int(80+30*(1-t)); b=int(160+70*t)
+        draw.line((x,0,x,H),fill=(r,g,b))
+    for y in range(0,H,6):
+        draw.line((0,y,W,y),fill=(255,255,255,10))
+    try:
+        font_b=ImageFont.truetype("DejaVuSans-Bold.ttf",34)
+        font=ImageFont.truetype("DejaVuSans.ttf",24)
+        font_sm=ImageFont.truetype("DejaVuSans.ttf",19)
+    except Exception:
+        font_b=font=font_sm=ImageFont.load_default()
+    draw.rounded_rectangle((22,22,W-22,H-22),radius=34,outline=(255,255,255),width=2)
+    draw.text((55,48),"EduPredict SPP",font=font_b,fill="white")
+    draw.text((W-280,55),"STUDENT SMART CARD",font=font_sm,fill=(230,245,255))
+    draw.rounded_rectangle((58,130,220,250),radius=18,fill=(235,200,105),outline=(255,255,255),width=2)
+    draw.line((76,160,202,160),fill=(150,110,35),width=3); draw.line((76,190,202,190),fill=(150,110,35),width=3); draw.line((76,220,202,220),fill=(150,110,35),width=3)
+    name=str(profile.get("Student_Name", "")).strip()[:30]
+    uid=str(profile.get("University_ID","")).strip()[:28]
+    dept=str(profile.get("Department","")).strip()[:42]
+    college=str(profile.get("Studied_College","")).strip()[:45]
+    sem=str(profile.get("Semester","")).strip()
+    draw.text((260,135),name,font=font_b,fill="white")
+    draw.text((260,182),f"University ID: {uid}",font=font,fill=(235,245,255))
+    draw.text((260,224),f"Department: {dept}",font=font_sm,fill=(235,245,255))
+    draw.text((55,315),f"College: {college}",font=font_sm,fill="white")
+    draw.text((55,365),f"Semester: {sem}",font=font_sm,fill="white")
+    draw.text((55,410),f"Registration ID: {str(profile.get('Registration_ID',''))}",font=font_sm,fill="white")
+    draw.text((55,520),"KTU B.Tech • Academic Smart Identity",font=font_sm,fill=(225,240,255))
+    draw.text((W-280,520),"EDUPREDICT",font=font_b,fill="white")
     return img
-
-
-def _clear_card_preview():
-    st.session_state.smart_card_preview = None
-    st.session_state.smart_card_message = "Smart Card downloaded. Preview removed."
-
 
 def smart_card_page():
     app_brand()
     st.title("🪪 Student Smart Card")
-    st.caption("Create a professional academic Smart Card. Registration details are stored for the Principal portal.")
-
+    st.caption("Submit your identity details once. Full registration data is stored for the Principal portal; the downloadable card contains only essential academic identity fields.")
     if st.session_state.get("smart_card_message"):
         st.success(st.session_state.smart_card_message)
         st.session_state.smart_card_message = ""
-
-    # Never allow a future DOB. The range automatically moves forward each year.
-    today = datetime.now().date()
-    min_dob = today.replace(year=max(1900, today.year - 100))
-    max_dob = today
-    default_dob = today.replace(year=max(2000, min(today.year - 18, today.year)))
-
     with st.form("smart_card_registration_form", clear_on_submit=False):
-        c1, c2 = st.columns(2)
+        c1,c2=st.columns(2)
         with c1:
-            reg_id = st.text_input("Registration ID *", placeholder="e.g. REG2026CE001")
-            name = st.text_input("Student Name *")
-            dob = st.date_input("Date of Birth *", value=default_dob, min_value=min_dob, max_value=max_dob)
-            blood = st.selectbox("Blood Group *", BLOOD_GROUPS)
-            address = st.text_area("Address *", height=90)
-            pin = st.text_input("PIN Code *", max_chars=6, placeholder="6-digit PIN")
+            reg_id=st.text_input("Registration ID *", placeholder="e.g. REG2026CE001")
+            name=st.text_input("Student Name *")
+            dob=st.date_input("DOB *", value=None)
+            blood=st.selectbox("Blood Group *", ["A+","A-","B+","B-","AB+","AB-","O+","O-"])
+            address=st.text_area("Address *", height=90)
+            pin=st.text_input("PIN Code *", max_chars=6)
         with c2:
-            college = st.text_input("Studied College *")
-            department = st.selectbox("Department *", DEPARTMENTS)
-            semester = st.selectbox("Semester *", SEMESTERS)
-            cgpa = st.number_input("CGPA (optional)", min_value=0.0, max_value=10.0, value=0.0, step=0.01)
-            university_choice = st.selectbox("University *", UNIVERSITY_OPTIONS)
-            other_university = ""
-            if university_choice == "Other / Not Listed":
-                other_university = st.text_input("Enter University Name *")
-            uid = st.text_input("University ID (optional)", placeholder="e.g. KTU24CS001")
-
-        submitted = st.form_submit_button("✨ Create & Register Smart Card", type="primary", use_container_width=True)
-
+            college=st.text_input("Studied College *")
+            department=st.selectbox("Department *", DEPARTMENTS)
+            semester=st.selectbox("Semester *", SEMESTERS)
+            cgpa=st.number_input("CGPA (optional)", min_value=0.0, max_value=10.0, value=0.0, step=0.01)
+            university=st.text_input("University Name *", value="APJ Abdul Kalam Technological University")
+            uid=st.text_input("University ID (optional)")
+        submitted=st.form_submit_button("🪪 Submit & Generate Smart Card", type="primary", use_container_width=True)
     if submitted:
-        university = other_university.strip() if university_choice == "Other / Not Listed" else university_choice
-        errors = []
-        if not reg_id.strip():
-            errors.append("Registration ID is required.")
-        elif not re.fullmatch(r"[A-Za-z0-9_-]{4,30}", reg_id.strip()):
-            errors.append("Registration ID must be 4–30 characters using letters, numbers, _ or - only.")
-        if not name.strip(): errors.append("Student Name is required.")
-        if not address.strip(): errors.append("Address is required.")
-        if not re.fullmatch(r"\d{6}", pin.strip()): errors.append("PIN Code must contain exactly 6 digits.")
-        if not college.strip(): errors.append("Studied College is required.")
-        if not university: errors.append("University is required.")
-        if dob > today: errors.append("Date of Birth cannot be in the future.")
-        if not (min_dob <= dob <= max_dob): errors.append("Please select a valid Date of Birth.")
-
-        if errors:
-            for err in errors:
-                st.error("❌ " + err)
+        required=[reg_id,name,address,pin,college,department,semester,university]
+        if not all(str(x).strip() for x in required):
+            st.error("Please fill all required (*) fields.")
             return
-
-        row = {
-            "Registration_ID": reg_id.strip(),
-            "Student_Name": name.strip(),
-            "DOB": dob.strftime("%Y-%m-%d"),
-            "Blood_Group": blood,
-            "Address": address.strip(),
-            "PIN_Code": pin.strip(),
-            "Studied_College": college.strip(),
-            "Department": department,
-            "Semester": semester,
-            "CGPA": f"{cgpa:.2f}" if cgpa else "",
-            "University_Name": university,
-            "University_ID": uid.strip(),
-            "Submitted_Time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        }
-
+        if not re.fullmatch(r"\d{6}", pin.strip()):
+            st.error("PIN Code must contain exactly 6 digits.")
+            return
+        if not re.fullmatch(r"[A-Za-z0-9_-]{4,30}", reg_id.strip()):
+            st.error("Registration ID must be 4–30 characters using letters, numbers, _ or - only.")
+            return
+        row={"Registration_ID":reg_id.strip(),"Student_Name":name.strip(),"DOB":str(dob),"Blood_Group":blood,"Address":address.strip(),"PIN_Code":pin.strip(),"Studied_College":college.strip(),"Department":department,"Semester":semester,"CGPA":f"{cgpa:.2f}" if cgpa else "","University_Name":university.strip(),"University_ID":uid.strip(),"Submitted_Time":datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
+        save_smart_card(row)
         try:
-            save_smart_card(row)
-            img = create_student_card_png(row)
-            safe_id = re.sub(r"[^A-Za-z0-9_-]", "_", reg_id.strip()) or "student_card"
-            path = os.path.join(SMART_CARD_DIR, safe_id + ".png")
-            img.save(path, "PNG", optimize=True)
-            buf = io.BytesIO()
-            img.save(buf, format="PNG", optimize=True)
-            st.session_state.smart_card_preview = buf.getvalue()
-            st.session_state.smart_card_message = "Smart Card created and registered successfully."
+            img=create_student_card_png(row)
+            path=os.path.join(SMART_CARD_DIR,f"{re.sub(r'[^A-Za-z0-9_-]','_',reg_id.strip())}.png")
+            img.save(path,"PNG")
+            import io as _io
+            buf=_io.BytesIO(); img.save(buf,"PNG")
+            st.session_state.smart_card_preview=buf.getvalue()
+            st.session_state.smart_card_message="Smart Card registered successfully. Full details are available in the Principal portal."
             st.rerun()
-        except Exception as exc:
-            st.error("❌ Smart Card could not be generated.")
-            st.exception(exc)
-
-    card_data = st.session_state.get("smart_card_preview")
-    if card_data:
-        st.divider()
-        st.subheader("✨ Your Smart Card")
-        st.image(card_data, caption="EduPredict SPP Academic Smart Card", use_container_width=True)
-        st.download_button(
-            "📥 Download Smart Card (PNG)",
-            data=card_data,
-            file_name="EduPredict_Student_Smart_Card.png",
-            mime="image/png",
-            use_container_width=True,
-            on_click=_clear_card_preview,
-        )
-        st.caption("After downloading, the preview is automatically removed from the page.")
-
+        except Exception as e:
+            st.error(f"Smart Card generation error: {e}")
+    if st.session_state.get("smart_card_preview"):
+        st.subheader("Smart Card Preview")
+        st.image(st.session_state.smart_card_preview, use_container_width=True)
+        def clear_card_preview():
+            st.session_state.smart_card_preview=None
+            st.session_state.smart_card_message="Smart Card downloaded successfully. Preview removed."
+        st.download_button("📥 Download Smart Card PNG", data=st.session_state.smart_card_preview, file_name="Student_Smart_Card.png", mime="image/png", use_container_width=True, on_click=clear_card_preview)
     if st.button("⬅️ Back", use_container_width=True):
-        st.session_state.page = "home"
-        st.rerun()
+        st.session_state.page="home"; st.rerun()
 
 # ============================================================
 # LOGIN / PAGES
@@ -1553,6 +1396,8 @@ def home_page():
     if b.button("🎓 Student Login", use_container_width=True):
         st.session_state.page = "student_login"; st.rerun()
     st.write("")
+    if st.button("👤 Student Profile Lookup", use_container_width=True):
+        st.session_state.page = "student_profile_lookup"; st.rerun()
     if st.button("🪪 Student Smart Card Registration", use_container_width=True):
         st.session_state.page = "smart_card"; st.rerun()
 
@@ -1595,9 +1440,10 @@ def teacher_login():
 
 
 def student_login():
-    login_shell("Student Login", "Use the University ID registered by your tutor")
-    st.info("💡 Enter the University ID registered by your tutor. No student username or password is required.")
+    login_shell("Student Login", "Use the Username and University ID registered by your tutor")
+    st.info("💡 Example: Username **Aromal kv**  •  University ID **SNM25CE001**  •  🔓 No password required")
     with st.form("student_login_form"):
+        username = st.text_input("👤 Username", placeholder="e.g. Aromal kv")
         uid = st.text_input("🪪 University ID", placeholder="e.g. SNM25CE001")
         c1, c2 = st.columns(2)
         login = c1.form_submit_button("🎓 Enter Student Portal", use_container_width=True, type="primary")
@@ -1605,22 +1451,24 @@ def student_login():
     if back:
         st.session_state.page = "home"; st.rerun()
     if login:
-        registered = find_registered_credentials(uid)
+        registered = find_registered_credentials(username, uid)
         if not registered:
-            st.error("❌ No tutor-registered profile found for this University ID. Contact your tutor.")
+            st.error("❌ No tutor-registered profile found. Check your Username and University ID, or contact your tutor.")
             return
-        latest_report = find_student("", registered["University_ID"])
+        latest_report = find_student(registered["Username"], registered["University_ID"])
         st.session_state.logged_in = True
         st.session_state.role = "student"
-        st.session_state.username = str(registered["University_ID"]).strip()
+        st.session_state.username = str(registered["Username"]).strip()
         st.session_state.student_profile = registered
         st.session_state.student_report = latest_report
         st.session_state.student_result_calculated = False
-        log_action("Student", st.session_state.username, "Student Login", registered["University_ID"], registered.get("Department",""), registered.get("Semester",""), "Successful student login")
+        log_action("Student", st.session_state.username, "Student Login", registered["University_ID"], registered.get("Department", ""), registered.get("Semester", ""), "Student portal login")
         st.session_state.page = "student_dashboard"
         st.rerun()
 
-
+# ============================================================
+# K-MEANS TUTOR ANALYSIS
+# ============================================================
 def kmeans_analysis(department):
     """Robust K-Means tutor analysis. Handles 0, 1 and many records safely."""
     if not SKLEARN_AVAILABLE:
@@ -1747,15 +1595,16 @@ def tutor_portal():
     if st.session_state.get("teacher_menu_view") == "registration":
         st.subheader("🧑‍🎓 Register Student Profile")
         st.success(f"🏫 Tutor department locked to: **{assigned_department}**")
-        st.caption("✨ Every registration creates a portal identity. Students sign in using University ID only.")
+        st.caption("✨ Every registration creates a portal identity. Students later sign in with Username + University ID only.")
         with st.form("student_registration_form"):
-            uid = st.text_input("🪪 University ID *", placeholder="e.g. SNM25CE001")
-            name = st.text_input("📛 Student Name *", placeholder="e.g. Aromal K V")
+            username = st.text_input("👤 Student Username", placeholder="e.g. Aromal kv")
+            uid = st.text_input("🪪 University ID", placeholder="e.g. SNM25CE001")
+            name = st.text_input("📛 Student Name", placeholder="e.g. Aromal K V")
             semester = st.selectbox("📚 Student Semester", SEMESTERS)
-            st.caption("🔒 Department is controlled by your tutor account. Student username is not required.")
+            st.caption("🔒 Department is controlled by your tutor account.")
             submitted = st.form_submit_button("🚀 Submit Registration", use_container_width=True, type="primary")
         if submitted:
-            ok, msg = register_student(uid, name, assigned_department, semester, st.session_state.get("username", ""))
+            ok, msg = register_student(username, uid, name, assigned_department, semester, st.session_state.get("username", ""))
             (st.success if ok else st.error)(msg)
         reg = load_registrations()
         mine = reg[reg["Department"].astype(str).eq(str(assigned_department))] if not reg.empty else reg
@@ -1768,93 +1617,53 @@ def tutor_portal():
         logout()
 
 def manual_add_form(department, semester):
-    st.subheader("➕ Add One Student")
-    st.caption("Subjects are controlled by the Department + Semester selected at the top of the Tutor Dashboard.")
-
-    subjects = get_subjects(department, semester)
-    if not subjects:
-        st.error(
-            f"No subject mapping is configured for {department} — {semester}. "
-            "Add the official KTU subjects to SUBJECTS_BY_DEPARTMENT in this file."
-        )
+    st.subheader("➕ Enter Marks for One Registered Student")
+    subjects=get_subjects(department, semester)
+    if len(subjects)!=6:
+        st.error("Exactly 6 subjects are required for this Department + Semester.")
         return
-
-    st.success(f"📚 {len(subjects)} subjects loaded: {department} — {semester}")
-    st.dataframe(
-        pd.DataFrame({"No.": range(1, len(subjects) + 1), "Subject": subjects}),
-        use_container_width=True,
-        hide_index=True,
-    )
-
-    registered = load_registrations()
+    registered=load_registrations()
     if not registered.empty:
-        registered = registered[
-            registered["Department"].astype(str).str.strip().eq(str(department).strip()) &
-            registered["Semester"].astype(str).str.strip().str.upper().eq(str(semester).strip().upper())
-        ].reset_index(drop=True)
+        registered=registered[(registered["Department"].astype(str).str.strip()==str(department).strip()) & (registered["Semester"].astype(str).str.upper()==str(semester).upper())].reset_index(drop=True)
     if registered.empty:
-        st.warning(f"🔒 No registered students found for **{department} — {semester}**. Only department + semester matched registrations can receive marks.")
+        st.warning(f"No registered students found for {department} — {semester}.")
         return
-
-    registered_display = registered.apply(
-        lambda r: f"{r['University_ID']} — {r['Student_Name']} ({r['Username']})", axis=1
-    ).tolist()
-
-    with st.form(f"add_student_{re.sub(r'[^a-zA-Z0-9]', '_', department)}_{semester}"):
-        selected_student = st.selectbox("🟢 Active Registered Student — select one student", registered_display)
-        selected_idx = registered_display.index(selected_student)
-        reg_row = registered.iloc[selected_idx]
-        uid = str(reg_row["University_ID"]).strip()
-        username = uid
-        name = str(reg_row["Student_Name"]).strip()
-        st.success(f"✅ Registered: **{name}**  •  University ID: **{uid}**")
-
-        st.markdown("### Enter marks for the selected subjects")
-        values = []
-        for i, subject in enumerate(subjects):
-            st.markdown(f"**{i + 1}. {subject}**")
-            a, b, c, d = st.columns(4)
-            prefix = f"{re.sub(r'[^a-zA-Z0-9]', '_', department)}_{semester}_{i}"
-            att = a.number_input("Attendance %", 0.0, 100.0, 75.0, 1.0, key=f"att_{prefix}")
-            internal = b.number_input("Internal /40", 0.0, 40.0, 20.0, 1.0, key=f"int_{prefix}")
-            assignment = c.number_input("Assignment /15", 0.0, 15.0, 8.0, 1.0, key=f"asg_{prefix}")
-            previous = d.number_input("Previous /60", 0.0, 60.0, 30.0, 1.0, key=f"prev_{prefix}")
-            values.append(normalize_subject({
-                "Subject": subject,
-                "Attendance": att,
-                "Study_Hours": 0,
-                "Internal": internal,
-                "Assignment": assignment,
-                "Previous": previous,
-            }))
-
-        submitted = st.form_submit_button(
-            "💾 Submit Student",
-            use_container_width=True,
-            type="primary"
-        )
-
+    display=registered.apply(lambda r:f"{r['University_ID']} — {r['Student_Name']}",axis=1).tolist()
+    with st.form(f"mark_entry_{re.sub(r'[^a-zA-Z0-9]','_',department)}_{semester}"):
+        selected=st.selectbox("Registered Student",display)
+        idx=display.index(selected); reg=registered.iloc[idx]
+        uid=str(reg["University_ID"]).strip(); name=str(reg["Student_Name"]).strip()
+        tutor_name=st.text_input("👨‍🏫 Tutor Name *", value=str(st.session_state.get("username", "")))
+        st.success(f"Student: **{name}**  •  University ID: **{uid}**")
+        values=[]
+        for i,subject in enumerate(subjects):
+            st.markdown(f"**{i+1}. {subject}**")
+            a,b,c,d=st.columns(4); prefix=f"{re.sub(r'[^a-zA-Z0-9]','_',department)}_{semester}_{uid}_{i}"
+            att=a.number_input("Attendance %",0.0,100.0,75.0,1.0,key=f"att_{prefix}")
+            internal=b.number_input("Internal /40",0.0,40.0,20.0,1.0,key=f"int_{prefix}")
+            assignment=c.number_input("Assignment /15",0.0,15.0,8.0,1.0,key=f"asg_{prefix}")
+            previous=d.number_input("Previous /60",0.0,60.0,30.0,1.0,key=f"prev_{prefix}")
+            values.append(normalize_subject({"Subject":subject,"Attendance":att,"Study_Hours":0,"Internal":internal,"Assignment":assignment,"Previous":previous,"Tutor_Name":tutor_name.strip()}))
+        completed=st.checkbox("✅ Completed — include this tutor work in Principal salary/credit analysis", value=False)
+        submitted=st.form_submit_button("💾 Submit & Predict Student", type="primary", use_container_width=True)
     if submitted:
-        reg_check = find_registered_student(uid)
-        if not reg_check:
-            st.error("This student is not registered. Register the student first.")
-            return
-        if str(reg_check.get("Department", "")).strip() != str(department).strip() or str(reg_check.get("Semester", "")).strip().upper() != str(semester).strip().upper():
-            st.error("🔒 Permission denied: this student registration does not match the selected Department + Semester.")
-            return
-        if str(st.session_state.get("teacher_department", "")).strip() != str(department).strip():
-            st.error("🔒 Permission denied: tutor can enter marks only for the tutor-assigned department.")
-            return
-        if len(subjects) != 6:
-            st.error("This project requires exactly 6 subjects for the selected Semester + Department.")
-            return
-        report = make_report(username, name, uid, semester, department, values)
-        upsert_report(report)
-        log_action("Tutor", st.session_state.get("username", ""), "Student Mark Submission", uid, department, semester, f"Submitted marks for {name}")
-        st.success(f"✅ {name} saved under {department} — {semester}.")
-        st.session_state["last_added_uid"] = uid.strip()
-        st.session_state["last_added_department"] = department
-        st.rerun()
+        if not tutor_name.strip():
+            st.error("Tutor Name is required."); return
+        credit=tutor_overall_credit_10(values)
+        ann=train_ann_model()
+        for item in values:
+            pred,conf,_=predict_with_ann(item,ann)
+            item["ANN_Prediction"]=pred; item["ANN_Confidence"]=conf; item["Tutor_Name"]=tutor_name.strip(); item["Tutor_Credit_10"]=credit; item["Tutor_Completed"]=bool(completed)
+        try:
+            db_save_marks(uid,department,semester,tutor_name.strip(),values)
+            completed_tutor_audit(tutor_name.strip(),uid,department,semester,completed,credit)
+            st.success(f"✅ {name} saved. Automatic ANN prediction completed. Student Overall Credit: **{credit:.2f}/10**")
+            if completed: st.success("🟢 Tutor work marked COMPLETED and added to Principal salary analysis.")
+            else: st.info("🟡 Saved as pending. It will not count as completed tutor work until marked Completed.")
+            st.session_state["last_added_uid"]=uid
+            st.rerun()
+        except Exception as exc:
+            st.error(f"❌ Mark submission failed: {exc}")
 
 def teacher_dashboard():
     app_brand()
@@ -1911,7 +1720,7 @@ def teacher_dashboard():
     )
 
     tab1, tab2, tab3, tab4, tab5 = st.tabs([
-        "➕ Add Student", "📤 Upload CSV", "👥 Student Records", "📈 K-Means Analysis", "🧠 ANN Analysis"
+        "📝 Enter Marks", "📤 Upload CSV", "👥 Student Records", "📈 K-Means Analysis", "🧠 ANN Analysis"
     ])
 
     with tab1:
@@ -1936,7 +1745,7 @@ def teacher_dashboard():
                     if not reg:
                         rejected.append(str(report.get("University_ID", "")))
                         continue
-                    if str(reg.get("Student_Name", "")).strip().lower() != str(report.get("Student_Name", "")).strip().lower():
+                    if str(reg.get("Username", "")).strip().lower() != str(report.get("Username", "")).strip().lower() or str(reg.get("Student_Name", "")).strip().lower() != str(report.get("Student_Name", "")).strip().lower():
                         rejected.append(str(report.get("University_ID", "")))
                         continue
                     valid_reports.append(report)
@@ -1945,7 +1754,7 @@ def teacher_dashboard():
                         upsert_report(report)
                     st.success(f"✅ {len(valid_reports)} registered student record(s) uploaded successfully.")
                 if rejected:
-                    st.warning("⚠️ These rows were skipped because the student is not registered or the Student Name does not match: " + ", ".join(rejected))
+                    st.warning("⚠️ These rows were skipped because the student is not registered or the Username/Name does not match: " + ", ".join(rejected))
                 if not reports:
                     st.warning("No valid student rows were found in the CSV.")
             except Exception as exc:
@@ -1969,7 +1778,13 @@ def teacher_dashboard():
             row = filtered[filtered["University_ID"].astype(str).eq(str(selected))].iloc[0].to_dict()
             subs = parse_subjects(row["Subjects_JSON"])
             overall = float(np.mean([x["Overall"] for x in subs])) if subs else 0.0
-            st.metric("Selected Student Overall", f"{overall:.2f}%")
+            credit = float(subs[0].get("Tutor_Credit_10", tutor_overall_credit_10(subs))) if subs else 0.0
+            completed = bool(subs[0].get("Tutor_Completed", False)) if subs else False
+            tutor_name = str(subs[0].get("Tutor_Name", row.get("Username", ""))) if subs else ""
+            cmet1,cmet2,cmet3=st.columns(3)
+            cmet1.metric("Student Overall Credit", f"{credit:.2f}/10")
+            cmet2.metric("Tutor", tutor_name or "—")
+            cmet3.metric("Work Status", "COMPLETED" if completed else "PENDING")
             rows = [[x["Subject"], x["Attendance"], x["Internal"], x["Assignment"], x["Previous"], x["Overall"], x["Level"]] for x in subs]
             st.dataframe(pd.DataFrame(rows, columns=["Subject", "Attendance", "Internal", "Assignment", "Previous", "Score", "Performance"]), use_container_width=True, hide_index=True)
             c1, c2 = st.columns(2)
@@ -2095,15 +1910,9 @@ def student_dashboard():
     # Study hours are optional inputs used by the ANN/result analysis. The tutor
     # marks themselves remain unchanged.
     st.subheader("📊 Calculate My Mark")
-    st.write("Enter your daily study hours and click the button below to calculate your subject-wise result.")
-    study_hours = {}
+    st.write("Enter your **total daily study hours once**. The same total study-hour value is used for the overall student analysis and ANN prediction; tutor-entered marks remain read-only.")
     with st.form("student_calculate_result_form"):
-        for i, item in enumerate(subjects):
-            study_hours[item["Subject"]] = st.number_input(
-                f"{i+1}. {item['Subject']} — daily study hours",
-                min_value=0.0, max_value=6.0, value=float(item.get("Study_Hours", 0) or 0), step=0.5,
-                key=f"student_study_{i}_{report.get('Created_Time','')}"
-            )
+        total_study_hours = st.number_input("⏱️ Total Study Hours per Day", min_value=0.0, max_value=6.0, value=0.0, step=0.5, key=f"student_total_study_{report.get('Created_Time','')}")
         calculate = st.form_submit_button("📊 Calculate My Mark", use_container_width=True, type="primary")
 
     if calculate:
@@ -2111,7 +1920,7 @@ def student_dashboard():
         ann_model_result = train_ann_model()
         for item in subjects:
             copy = dict(item)
-            copy["Study_Hours"] = study_hours.get(item["Subject"], 0)
+            copy["Study_Hours"] = total_study_hours
             normalized = normalize_subject(copy)
             prediction, confidence, ann_info = predict_with_ann(normalized, ann_model_result)
             normalized["ANN_Prediction"] = prediction
@@ -2178,6 +1987,313 @@ def student_dashboard():
         type="primary",
     )
 
+
+# ============================================================
+# SUPABASE SHARED-DATABASE OVERRIDES
+# ============================================================
+# These definitions intentionally override the old local-CSV helpers above.
+# The UI can stay mostly unchanged, while both hosted portals use the same DB.
+from db import (
+    get_student as db_get_student,
+    get_students as db_get_students,
+    save_student as db_save_student,
+    delete_student as db_delete_student,
+    get_tutors as db_get_tutors,
+    save_tutor as db_save_tutor,
+    get_marks as db_get_marks,
+    save_marks as db_save_marks,
+    delete_marks as db_delete_marks,
+    get_smart_cards as db_get_smart_cards,
+    save_smart_card as db_save_smart_card,
+    save_file_metadata as db_save_file_metadata,
+    add_audit as db_add_audit,
+)
+
+def _db_registration_df():
+    rows = db_get_students()
+    if not rows:
+        return empty_registration_df()
+    out=[]
+    for r in rows:
+        out.append({
+            "Username": r.get("university_id", ""),  # internal compatibility; never requested from student
+            "University_ID": r.get("university_id", ""),
+            "Student_Name": r.get("student_name", ""),
+            "Department": r.get("department", ""),
+            "Semester": r.get("semester", ""),
+            "Tutor_Username": r.get("registered_by", ""),
+            "Registered_Time": r.get("registered_at", ""),
+        })
+    return pd.DataFrame(out, columns=REGISTRATION_COLUMNS)
+
+def load_registrations():
+    try:
+        return _db_registration_df()
+    except Exception as exc:
+        st.error(f"❌ Supabase student data error: {exc}")
+        return empty_registration_df()
+
+def save_registrations(df):
+    # Kept for compatibility. New code writes rows through register_student().
+    return None
+
+def log_action(role, username, action, university_id="", department="", semester="", details=""):
+    try:
+        db_add_audit(role, username, action, university_id, department, semester, details)
+    except Exception as exc:
+        st.warning(f"Audit log could not be saved: {exc}")
+
+def register_student(username, uid, name, department, semester, tutor_username, studied_college=""):
+    # username is retained only as a compatibility argument; the student never enters one.
+    uid, name = str(uid).strip(), str(name).strip()
+    department, semester = str(department).strip(), str(semester).strip().upper()
+    if not uid or not name or not department or not semester:
+        return False, "Enter University ID, Student Name, Department and Semester."
+    if department not in DEPARTMENTS or semester not in SEMESTERS:
+        return False, "Select a valid B.Tech Department and Semester."
+    try:
+        existing = db_get_student(uid)
+        if existing and bool(existing.get("active", True)):
+            return False, "This University ID is already registered."
+        db_save_student(uid, name, department, semester, studied_college, tutor_username, True)
+        log_action("Tutor", tutor_username, "Student Registration", uid, department, semester, f"Registered {name}")
+        return True, f"Student {name} registered successfully for {department} — {semester}."
+    except Exception as exc:
+        return False, f"Student registration failed: {exc}"
+
+def find_registered_student(uid):
+    try:
+        r=db_get_student(uid)
+        if not r or not bool(r.get("active", True)):
+            return None
+        return {
+            "Username": r.get("university_id", ""),
+            "University_ID": r.get("university_id", ""),
+            "Student_Name": r.get("student_name", ""),
+            "Department": r.get("department", ""),
+            "Semester": r.get("semester", ""),
+            "Tutor_Username": r.get("registered_by", ""),
+            "Registered_Time": r.get("registered_at", ""),
+        }
+    except Exception as exc:
+        st.error(f"❌ Supabase student lookup failed: {exc}")
+        return None
+
+def find_registered_credentials(username, uid):
+    # Student login is University-ID only. Username is ignored for compatibility.
+    return find_registered_student(uid)
+
+def _report_from_db(row, student=None):
+    student = student or find_registered_student(row.get("university_id", "")) or {}
+    subjects = row.get("subjects", [])
+    if isinstance(subjects, str):
+        subjects = parse_subjects(subjects)
+    submitted = row.get("submitted_at", "")
+    return {
+        "Username": student.get("University_ID", row.get("university_id", "")),
+        "Student_Name": student.get("Student_Name", ""),
+        "University_ID": row.get("university_id", ""),
+        "Semester": row.get("semester", student.get("Semester", "")),
+        "Department": row.get("department", student.get("Department", "")),
+        "Subjects_JSON": json.dumps(subjects),
+        "Created_Time": submitted,
+    }
+
+def load_reports():
+    try:
+        rows=db_get_marks()
+        return pd.DataFrame([_report_from_db(r) for r in rows], columns=REPORT_COLUMNS) if rows else empty_df()
+    except Exception as exc:
+        st.error(f"❌ Supabase marks error: {exc}")
+        return empty_df()
+
+def save_reports(df):
+    return None
+
+def upsert_report(report):
+    subjects=parse_subjects(report.get("Subjects_JSON", "[]"))
+    db_save_marks(report.get("University_ID", ""), report.get("Department", ""), report.get("Semester", ""), st.session_state.get("username", ""), subjects)
+
+def delete_student_record(report):
+    uid=str(report.get("University_ID", "")).strip()
+    if not uid:
+        return False, "University ID is missing."
+    try:
+        db_delete_marks(uid)
+        db_delete_student(uid)
+        log_action("Tutor", st.session_state.get("username", ""), "Student Record Deleted", uid, report.get("Department", ""), report.get("Semester", ""), "Deleted selected student record")
+        return True, f"Deleted student {uid} and their current mark record."
+    except Exception as exc:
+        return False, f"Delete failed: {exc}"
+
+def find_student(username, uid):
+    try:
+        rows=db_get_marks(uid)
+        if not rows:
+            return None
+        return _report_from_db(rows[0])
+    except Exception:
+        return None
+
+def load_smart_cards():
+    try:
+        rows=db_get_smart_cards()
+        out=[]
+        for r in rows:
+            out.append({
+                "Registration_ID":r.get("registration_id", ""), "Student_Name":r.get("name", ""),
+                "DOB":r.get("dob", ""), "Blood_Group":r.get("blood_group", ""),
+                "Address":r.get("address", ""), "PIN_Code":r.get("pin_code", ""),
+                "Studied_College":r.get("studied_college", ""), "Department":r.get("department", ""),
+                "Semester":r.get("semester", ""), "CGPA":r.get("cgpa", ""),
+                "University_Name":r.get("university_name", ""), "University_ID":r.get("university_id", ""),
+                "Submitted_Time":r.get("submitted_at", ""),
+            })
+        return pd.DataFrame(out, columns=SMART_CARD_COLUMNS) if out else pd.DataFrame(columns=SMART_CARD_COLUMNS)
+    except Exception as exc:
+        st.error(f"❌ Supabase Smart Card error: {exc}")
+        return pd.DataFrame(columns=SMART_CARD_COLUMNS)
+
+def save_smart_card(row):
+    db_save_smart_card(row)
+
+def tutor_portal():
+    app_brand()
+    assigned_department=st.session_state.get("teacher_department")
+    tutor_name=st.session_state.get("username", "")
+    st.title("👨‍🏫 Tutor Control Center")
+    st.caption(f"Logged in as: **{tutor_name}** • 🏫 Department: **{assigned_department}**")
+    # Ensure the tutor is visible in the shared Principal portal.
+    credit_score=st.number_input("⭐ Tutor Credit Score /10", min_value=0.0, max_value=10.0, value=0.0, step=0.1, key="tutor_credit_score")
+    try:
+        db_save_tutor(tutor_name, tutor_name, assigned_department, "", credit_score, True)
+    except Exception as exc:
+        st.warning(f"Tutor profile sync warning: {exc}")
+    st.info("🔐 You can register students only in your assigned department. Students are identified by University ID; no student username is required.")
+    c1,c2=st.columns(2)
+    with c1:
+        st.markdown("### 🧑‍🎓 Student Registration")
+        if st.button("🪪 Open Student Registration", use_container_width=True, type="primary"):
+            st.session_state.teacher_menu_view="registration"; st.rerun()
+    with c2:
+        st.markdown("### 📝 Student Mark Entry")
+        if st.button("📊 Open Student Mark Entry", use_container_width=True):
+            st.session_state.teacher_menu_view="marks"; st.session_state.page="teacher_dashboard"; st.rerun()
+    st.divider()
+    if st.session_state.get("teacher_menu_view")=="registration":
+        st.subheader(f"🪪 Register Student — {assigned_department}")
+        with st.form("shared_student_registration_form"):
+            uid=st.text_input("University ID *", placeholder="e.g. KTU24CE001")
+            name=st.text_input("Student Name *")
+            semester=st.selectbox("Semester *", SEMESTERS)
+            college=st.text_input("Studied College (optional)")
+            submitted=st.form_submit_button("✅ Register Student", type="primary", use_container_width=True)
+        if submitted:
+            ok,msg=register_student("",uid,name,assigned_department,semester,tutor_name,college)
+            (st.success if ok else st.error)(msg)
+        mine=load_registrations()
+        mine=mine[mine["Department"].astype(str).eq(str(assigned_department))] if not mine.empty else mine
+        st.subheader(f"📋 Registered Students — {assigned_department} ({len(mine)})")
+        if mine.empty: st.info("No students registered in your department yet.")
+        else:
+            st.dataframe(mine[["University_ID","Student_Name","Department","Semester","Tutor_Username","Registered_Time"]], use_container_width=True, hide_index=True)
+    if st.button("🚪 Logout", use_container_width=True):
+        log_action("Tutor", tutor_name, "Tutor Logout")
+        logout()
+
+def student_login():
+    login_shell("Student Login", "Use your University ID only")
+    st.info("💡 Enter your University ID. You can view your tutor-registered profile even before marks are entered.")
+    with st.form("student_login_form"):
+        uid=st.text_input("🪪 University ID", placeholder="e.g. KTU24CE001")
+        c1,c2=st.columns(2)
+        login=c1.form_submit_button("🎓 Enter Student Portal", use_container_width=True, type="primary")
+        back=c2.form_submit_button("← Back", use_container_width=True)
+    if back:
+        st.session_state.page="home"; st.rerun()
+    if login:
+        registered=find_registered_student(uid)
+        if not registered:
+            st.error("❌ No tutor-registered profile found for this University ID.")
+            return
+        latest_report=find_student(registered["University_ID"], registered["University_ID"])
+        st.session_state.logged_in=True; st.session_state.role="student"; st.session_state.username=registered["University_ID"]
+        st.session_state.student_profile=registered; st.session_state.student_report=latest_report; st.session_state.student_result_calculated=False
+        log_action("Student", registered["University_ID"], "Student Login", registered["University_ID"], registered.get("Department", ""), registered.get("Semester", ""), "Student portal login")
+        st.session_state.page="student_dashboard"; st.rerun()
+
+# Standalone profile lookup: University ID + Name only, independent of tutor mark entry.
+def student_profile_lookup():
+    login_shell("Student Profile Lookup", "View your registered profile without waiting for tutor marks")
+    with st.form("student_profile_lookup_form"):
+        uid=st.text_input("🪪 University ID *", placeholder="e.g. KTU24CE001")
+        name=st.text_input("👤 Student Name *", placeholder="Enter the registered name")
+        c1,c2=st.columns(2)
+        find=c1.form_submit_button("🔎 View Profile", type="primary", use_container_width=True)
+        back=c2.form_submit_button("← Back", use_container_width=True)
+    if back:
+        st.session_state.page="home"; st.rerun()
+    if find:
+        profile=find_registered_student(uid)
+        if not profile or str(profile.get("Student_Name","")).strip().casefold()!=name.strip().casefold():
+            st.error("❌ University ID and Student Name do not match a registered student.")
+            return
+        st.success("✅ Registered profile found. Tutor marks are not required to view this profile.")
+        a,b,c,d=st.columns(4)
+        a.metric("Student Name", profile.get("Student_Name","—"))
+        b.metric("University ID", profile.get("University_ID","—"))
+        c.metric("Department", profile.get("Department","—"))
+        d.metric("Semester", profile.get("Semester","—"))
+        st.write(f"**Studied College:** {profile.get('Studied_College','—')}")
+        st.write(f"**Registered By Tutor:** {profile.get('Tutor_Username','—')}")
+        st.write(f"**Registered At:** {profile.get('Registered_Time','—')}")
+        st.info("📌 Marks and performance results remain separate and will appear in the Student Portal after tutor submission.")
+
+# Smart Card uses the current calendar year automatically and cannot accept a future date.
+def smart_card_page():
+    app_brand(); st.title("🪪 Student Smart Card"); st.caption("Professional academic identity card. Submitted details are stored in the shared Principal database.")
+    if st.session_state.get("smart_card_message"):
+        st.success(st.session_state.smart_card_message); st.session_state.smart_card_message=""
+    today=datetime.now().date(); min_dob=today.replace(year=max(1900,today.year-100)); max_dob=today
+    with st.form("smart_card_registration_form", clear_on_submit=False):
+        c1,c2=st.columns(2)
+        with c1:
+            reg_id=st.text_input("Registration ID *", placeholder=f"REG{today.year}CE001")
+            name=st.text_input("Name *")
+            dob=st.date_input("DOB *", value=datetime(today.year-18,1,1).date(), min_value=min_dob, max_value=max_dob)
+            blood=st.selectbox("Blood Group *", ["A+","A-","B+","B-","AB+","AB-","O+","O-"])
+            address=st.text_area("Address *", height=90)
+            pin=st.text_input("PIN Code *", max_chars=6)
+        with c2:
+            college=st.text_input("Studied College *")
+            department=st.selectbox("Department *", DEPARTMENTS)
+            semester=st.selectbox("Semester *", SEMESTERS)
+            cgpa=st.number_input("CGPA (optional)",0.0,10.0,0.0,0.01)
+            universities=["APJ Abdul Kalam Technological University","University of Kerala","Mahatma Gandhi University","University of Calicut","Kannur University","Cochin University of Science and Technology","University of Mumbai","University of Delhi","University of Madras","Anna University","VTU","Other / Not Listed"]
+            choice=st.selectbox("University Name *",universities)
+            university=st.text_input("Enter University Name *") if choice=="Other / Not Listed" else choice
+            uid=st.text_input("University ID (optional)")
+        submitted=st.form_submit_button("🪪 Submit & Generate Smart Card", type="primary", use_container_width=True)
+    if submitted:
+        if not all(str(x).strip() for x in [reg_id,name,address,pin,college,department,semester,university]):
+            st.error("Please fill all required (*) fields."); return
+        if not re.fullmatch(r"\d{6}",pin.strip()): st.error("PIN Code must contain exactly 6 digits."); return
+        if dob>today: st.error("DOB cannot be in the future."); return
+        if not re.fullmatch(r"[A-Za-z0-9_-]{4,30}",reg_id.strip()): st.error("Registration ID must be 4–30 characters using letters, numbers, _ or - only."); return
+        row={"Registration_ID":reg_id.strip(),"Student_Name":name.strip(),"DOB":dob.isoformat(),"Blood_Group":blood,"Address":address.strip(),"PIN_Code":pin.strip(),"Studied_College":college.strip(),"Department":department,"Semester":semester,"CGPA":f"{cgpa:.2f}" if cgpa else "","University_Name":university.strip(),"University_ID":uid.strip(),"Submitted_Time":datetime.now().isoformat()}
+        try:
+            save_smart_card(row)
+            img=create_student_card_png(row); buf=io.BytesIO(); img.save(buf,"PNG")
+            st.session_state.smart_card_preview=buf.getvalue(); st.session_state.smart_card_message="Smart Card registered successfully. Details are now visible in the Principal portal."; st.rerun()
+        except Exception as exc:
+            st.error(f"❌ Smart Card could not be saved: {exc}")
+    card=st.session_state.get("smart_card_preview")
+    if card:
+        st.image(card,use_container_width=True)
+        def _clear(): st.session_state.smart_card_preview=None; st.session_state.smart_card_message="Smart Card downloaded successfully. Preview removed."
+        st.download_button("📥 Download Smart Card PNG",card,"Student_Smart_Card.png","image/png",use_container_width=True,on_click=_clear)
+    if st.button("⬅️ Back",use_container_width=True): st.session_state.page="home"; st.rerun()
+
 # Clear obsolete widget keys from earlier versions if they exist.
 for _old_key in ("active_department", "manual_department_selector", "manual_semester_selector"):
     if _old_key in st.session_state:
@@ -2194,6 +2310,8 @@ elif st.session_state.page == "smart_card":
     smart_card_page()
 elif st.session_state.page == "student_login":
     student_login()
+elif st.session_state.page == "student_profile_lookup":
+    student_profile_lookup()
 elif st.session_state.page == "teacher_portal" and st.session_state.logged_in and st.session_state.role == "teacher":
     tutor_portal()
 elif st.session_state.page == "teacher_dashboard" and st.session_state.logged_in and st.session_state.role == "teacher":
