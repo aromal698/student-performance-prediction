@@ -352,6 +352,17 @@ def find_registered_student(uid):
     found = df[df["University_ID"].astype(str).str.strip().str.lower().eq(str(uid).strip().lower())]
     return found.iloc[-1].to_dict() if not found.empty else None
 
+def find_registered_credentials(username, uid):
+    """Find a tutor-registered student using both Username and University ID."""
+    df = load_registrations()
+    if df.empty:
+        return None
+    found = df[
+        df["Username"].astype(str).str.strip().str.lower().eq(str(username).strip().lower()) &
+        df["University_ID"].astype(str).str.strip().str.lower().eq(str(uid).strip().lower())
+    ]
+    return found.iloc[-1].to_dict() if not found.empty else None
+
 def load_reports():
     if not os.path.exists(REPORT_FILE):
         return empty_df()
@@ -1259,10 +1270,11 @@ def valid_student_password(password):
 
 
 def student_login():
-    login_shell("Student Login", "Username + University ID + BTECH year password")
+    login_shell("Student Login", "Login using the profile registered by your tutor")
+    st.info("💡 Example: Username **Aromal kv**  •  University ID **SNM25CE001**  •  Password **BTECH2007**")
     with st.form("student_login_form"):
-        username = st.text_input("Username", placeholder="e.g. student01")
-        uid = st.text_input("University ID", placeholder="e.g. UNI001")
+        username = st.text_input("Username", placeholder="e.g. Aromal kv")
+        uid = st.text_input("University ID", placeholder="e.g. SNM25CE001")
         password = st.text_input("Password", type="password", placeholder="Example: BTECH2007", max_chars=9)
         st.caption("Password format: BTECH + year from 2000 to 2022, e.g. BTECH2007")
         c1, c2 = st.columns(2)
@@ -1274,16 +1286,23 @@ def student_login():
         if not valid_student_password(password):
             st.error("Invalid password format. Use BTECH followed by a year from 2000–2022.")
             return
-        student = find_student(username, uid)
-        if student:
-            st.session_state.logged_in = True
-            st.session_state.role = "student"
-            st.session_state.username = username.strip()
-            st.session_state.student_report = student
-            st.session_state.page = "student_dashboard"
-            st.rerun()
-        else:
-            st.error("No matching student record found. Check Username and University ID.")
+
+        # Student access starts from the tutor-registered profile. Marks are
+        # deliberately checked separately, so a registered student can log in
+        # and see their profile even before the tutor enters marks.
+        registered = find_registered_credentials(username, uid)
+        if not registered:
+            st.error("No tutor-registered student profile found. Ask your tutor to register your Username and University ID first.")
+            return
+
+        latest_report = find_student(registered["Username"], registered["University_ID"])
+        st.session_state.logged_in = True
+        st.session_state.role = "student"
+        st.session_state.username = str(registered["Username"]).strip()
+        st.session_state.student_profile = registered
+        st.session_state.student_report = latest_report
+        st.session_state.page = "student_dashboard"
+        st.rerun()
 
 # ============================================================
 # K-MEANS TUTOR ANALYSIS
@@ -1692,29 +1711,64 @@ def teacher_dashboard():
 # ============================================================
 def student_dashboard():
     app_brand()
-    student = st.session_state.student_report
-    if not student:
+    profile = st.session_state.get("student_profile")
+    if not profile:
         logout(); return
 
-    subjects = parse_subjects(student["Subjects_JSON"])
-    # Student enters study hours one subject at a time after login.
-    st.title(f"🎓 Welcome, {student['Student_Name']}")
-    st.caption(f"University ID: {student['University_ID']}  •  {student['Semester']}  •  {student['Department']}")
-    if st.button("🚪 Logout"):
+    # Always refresh the latest tutor-entered record. This means a student who
+    # logged in before marks were entered will see the marks as soon as the tutor
+    # submits them and the student opens/calculates the result again.
+    latest_report = find_student(profile.get("Username", ""), profile.get("University_ID", ""))
+    st.session_state.student_report = latest_report
+
+    st.title(f"🎓 Welcome, {profile.get('Student_Name', '')}")
+    st.caption(f"University ID: {profile.get('University_ID', '')}")
+
+    if st.button("🚪 Logout", use_container_width=False):
         logout()
 
-    st.subheader("⏱️ Enter Daily Study Hours")
-    st.write("Enter your study hours for each subject. The tutor-submitted marks remain unchanged.")
+    # --------------------------------------------------------
+    # Tutor-registered student profile
+    # --------------------------------------------------------
+    st.subheader("👤 My Tutor-Registered Profile")
+    p1, p2, p3 = st.columns(3)
+    p1.markdown(f'<div class="metric-card"><div class="label">Student Name</div><div class="value" style="font-size:1.25rem">{profile.get("Student_Name", "—")}</div></div>', unsafe_allow_html=True)
+    p2.markdown(f'<div class="metric-card"><div class="label">Username</div><div class="value" style="font-size:1.25rem">{profile.get("Username", "—")}</div></div>', unsafe_allow_html=True)
+    p3.markdown(f'<div class="metric-card"><div class="label">University ID</div><div class="value" style="font-size:1.25rem">{profile.get("University_ID", "—")}</div></div>', unsafe_allow_html=True)
+    st.write(f"**Registered on:** {profile.get('Registered_Time', '—')}")
 
+    report = latest_report
+    if not report:
+        st.warning("⏳ Your profile is registered by the tutor, but marks have not been entered yet.")
+        st.info("The **📊 Calculate My Mark** option will become available after your tutor submits your marks.")
+        st.button("📊 Calculate My Mark", disabled=True, use_container_width=True)
+        return
+
+    # --------------------------------------------------------
+    # Marks are visible only after the tutor has submitted them.
+    # --------------------------------------------------------
+    subjects = parse_subjects(report.get("Subjects_JSON", "[]"))
+    if not subjects:
+        st.warning("Your tutor record exists, but no subject marks have been submitted yet.")
+        st.button("📊 Calculate My Mark", disabled=True, use_container_width=True)
+        return
+
+    st.success(f"✅ Tutor marks received for **{report.get('Department', '—')} — {report.get('Semester', '—')}**.")
+    st.info("🔐 Your tutor-entered marks are read-only here. You can calculate your result, but you cannot edit the tutor marks.")
+
+    # Study hours are optional inputs used by the ANN/result analysis. The tutor
+    # marks themselves remain unchanged.
+    st.subheader("📊 Calculate My Mark")
+    st.write("Enter your daily study hours and click the button below to calculate your subject-wise result.")
     study_hours = {}
-    with st.form("study_hours_form"):
+    with st.form("student_calculate_result_form"):
         for i, item in enumerate(subjects):
             study_hours[item["Subject"]] = st.number_input(
-                f"{i+1}. {item['Subject']} — hours/day",
-                min_value=0.0, max_value=6.0, value=2.0, step=0.5,
-                key=f"student_study_{i}"
+                f"{i+1}. {item['Subject']} — daily study hours",
+                min_value=0.0, max_value=6.0, value=float(item.get("Study_Hours", 0) or 0), step=0.5,
+                key=f"student_study_{i}_{report.get('Created_Time','')}"
             )
-        calculate = st.form_submit_button("📊 Calculate My Result", use_container_width=True, type="primary")
+        calculate = st.form_submit_button("📊 Calculate My Mark", use_container_width=True, type="primary")
 
     if calculate:
         updated = []
@@ -1727,60 +1781,65 @@ def student_dashboard():
             normalized["ANN_Prediction"] = prediction
             normalized["ANN_Confidence"] = confidence
             updated.append(normalized)
-        student["Subjects_JSON"] = json.dumps(updated)
-        st.session_state.student_report = student
-        subjects = updated
 
-    # Use current stored values if the user has calculated at least once.
-    subjects = parse_subjects(st.session_state.student_report["Subjects_JSON"])
+        # Keep tutor-entered values intact while updating only the student's
+        # calculation fields in the current session.
+        report_view = dict(report)
+        report_view["Subjects_JSON"] = json.dumps(updated)
+        st.session_state.student_report = report_view
+        subjects = updated
+        st.session_state.student_result_calculated = True
+
+    # Do not show marks until the student has explicitly clicked Calculate.
+    if not st.session_state.get("student_result_calculated", False):
+        st.info("👆 Click **Calculate My Mark** above to view your marks and performance result.")
+        return
+
+    subjects = parse_subjects(st.session_state.student_report.get("Subjects_JSON", "[]"))
     overall = float(np.mean([x["Overall"] for x in subjects])) if subjects else 0
 
-    if any(float(x.get("Study_Hours", 0)) > 0 for x in subjects):
-        if overall >= 80:
-            st.balloons()
-            st.markdown(f'<div class="good-pop"><div style="font-size:4rem">🎉🏆</div><h2>Excellent Performance!</h2><p>Your marks are looking good. Keep the same consistency!</p><p>Overall score: <b>{overall:.2f}%</b></p></div>', unsafe_allow_html=True)
-        elif overall < 50:
-            st.markdown(f'<div class="sad-pop"><div style="font-size:4rem">😔📉</div><h2>Needs Improvement</h2><p>Don’t give up. Follow the subject-wise improvement methods below.</p><p>Overall score: <b>{overall:.2f}%</b></p></div>', unsafe_allow_html=True)
-        else:
-            st.info(f"📘 Your marks are available. Overall score: **{overall:.2f}%**. Check each subject below for its individual indicator.")
+    if overall >= 80:
+        st.balloons()
+        st.markdown(f'<div class="good-pop"><div style="font-size:4rem">🎉🏆</div><h2>Excellent Performance!</h2><p>Your marks are looking good. Keep the same consistency!</p><p>Overall score: <b>{overall:.2f}%</b></p></div>', unsafe_allow_html=True)
+    elif overall < 50:
+        st.markdown(f'<div class="sad-pop"><div style="font-size:4rem">😔📉</div><h2>Needs Improvement</h2><p>Don’t give up. Follow the subject-wise improvement methods below.</p><p>Overall score: <b>{overall:.2f}%</b></p></div>', unsafe_allow_html=True)
+    else:
+        st.info(f"📘 Your marks are available. Overall score: **{overall:.2f}%**. Check each subject below for its individual indicator.")
 
-        a, b, c = st.columns(3)
-        a.markdown(f'<div class="metric-card"><div class="label">Overall Score</div><div class="value">{overall:.2f}%</div></div>', unsafe_allow_html=True)
-        b.markdown(f'<div class="metric-card"><div class="label">Subjects</div><div class="value">{len(subjects)}</div></div>', unsafe_allow_html=True)
-        status = "Good" if overall >= 80 else "Above Average" if overall >= 65 else "Average" if overall >= 50 else "Needs Improvement"
-        c.markdown(f'<div class="metric-card"><div class="label">Status</div><div class="value">{status}</div></div>', unsafe_allow_html=True)
-        ann_subjects = [x for x in subjects if x.get("ANN_Prediction")]
-        if ann_subjects:
-            st.caption("🧠 ANN: Multilayer Perceptron using Attendance, Internal, Assignment, Previous Mark and Study Hours.")
+    a, b, c = st.columns(3)
+    a.markdown(f'<div class="metric-card"><div class="label">Overall Score</div><div class="value">{overall:.2f}%</div></div>', unsafe_allow_html=True)
+    b.markdown(f'<div class="metric-card"><div class="label">Subjects</div><div class="value">{len(subjects)}</div></div>', unsafe_allow_html=True)
+    status = "Good" if overall >= 80 else "Above Average" if overall >= 65 else "Average" if overall >= 50 else "Needs Improvement"
+    c.markdown(f'<div class="metric-card"><div class="label">Status</div><div class="value">{status}</div></div>', unsafe_allow_html=True)
 
-        rows = []
-        for x in subjects:
-            rows.append([x["Subject"], f"{x['Attendance']:.0f}%", f"{x.get('Attendance_Mark', attendance_mark(x['Attendance']))}/5", f"{x['Internal']:.0f}/40", f"{x['Assignment']:.0f}/15", f"{x['Previous']:.0f}/60", f"{x['Study_Hours']:.1f} h", f"{x['Overall']:.1f}%", f"{x.get('Circle', performance_circle(x['Level']))} {x['Level']}", x.get("ANN_Prediction", "—"), f"{float(x.get('ANN_Confidence', 0)):.1f}%" ])
-        st.subheader("📊 Your Marks — Subject-wise Result")
-        st.dataframe(pd.DataFrame(rows, columns=["Subject", "Attendance", "Att. Mark", "Internal", "Assignment", "Previous", "Study", "Score", "Performance", "ANN Prediction", "ANN Confidence"]), use_container_width=True, hide_index=True)
+    rows = []
+    for x in subjects:
+        rows.append([x["Subject"], f"{x['Attendance']:.0f}%", f"{x.get('Attendance_Mark', attendance_mark(x['Attendance']))}/5", f"{x['Internal']:.0f}/40", f"{x['Assignment']:.0f}/15", f"{x['Previous']:.0f}/60", f"{x['Study_Hours']:.1f} h", f"{x['Overall']:.1f}%", f"{x.get('Circle', performance_circle(x['Level']))} {x['Level']}", x.get("ANN_Prediction", "—"), f"{float(x.get('ANN_Confidence', 0)):.1f}%" ])
+    st.subheader("📊 My Marks — Subject-wise Result")
+    st.dataframe(pd.DataFrame(rows, columns=["Subject", "Attendance", "Att. Mark", "Internal", "Assignment", "Previous", "Study", "Score", "Performance", "ANN Prediction", "ANN Confidence"]), use_container_width=True, hide_index=True)
 
-        st.subheader("🎯 Subject-wise Performance & Improvement")
-        for x in subjects:
-            circle = x.get('Circle', performance_circle(x['Level']))
-            with st.expander(f"{circle} {x['Subject']} — {x['Level']} — {x['Overall']:.1f}%"):
-                st.markdown(f"**Overall information:** Attendance **{x['Attendance']:.0f}% → {x.get('Attendance_Mark', attendance_mark(x['Attendance']))}/5**, Internal **{x['Internal']:.0f}/40**, Assignment **{x['Assignment']:.0f}/15**, Previous **{x['Previous']:.0f}/60**, Study **{x['Study_Hours']:.1f} h/day**.")
-                if x.get("ANN_Prediction"):
-                    st.info(f"🧠 ANN Prediction: **{x['ANN_Prediction']}**  •  Confidence: **{float(x.get('ANN_Confidence', 0)):.1f}%**")
-                st.success("💚 " + x.get("Compliment", "Keep progressing!"))
-                st.markdown("**How to improve:**")
-                for recommendation in x["Recommendations"]:
-                    st.write("• " + recommendation)
+    st.subheader("🎯 Subject-wise Performance & Improvement")
+    for x in subjects:
+        circle = x.get('Circle', performance_circle(x['Level']))
+        with st.expander(f"{circle} {x['Subject']} — {x['Level']} — {x['Overall']:.1f}%"):
+            st.markdown(f"**Tutor-entered marks:** Attendance **{x['Attendance']:.0f}% → {x.get('Attendance_Mark', attendance_mark(x['Attendance']))}/5**, Internal **{x['Internal']:.0f}/40**, Assignment **{x['Assignment']:.0f}/15**, Previous **{x['Previous']:.0f}/60**.  **Study:** {x['Study_Hours']:.1f} h/day.")
+            if x.get("ANN_Prediction"):
+                st.info(f"🧠 ANN Prediction: **{x['ANN_Prediction']}**  •  Confidence: **{float(x.get('ANN_Confidence', 0)):.1f}%**")
+            st.success("💚 " + x.get("Compliment", "Keep progressing!"))
+            st.markdown("**How to improve:**")
+            for recommendation in x["Recommendations"]:
+                st.write("• " + recommendation)
 
-        st.caption("🔴 Needs Improvement  •  🟠 Average  •  🟡 Above Average  •  🟢 Good")
+    st.caption("🔴 Needs Improvement  •  🟠 Average  •  🟡 Above Average  •  🟢 Good")
 
-        st.download_button(
-            "📥 Download Progress Report PDF",
-            create_pdf(st.session_state.student_report),
-            f"{student['University_ID']}_Progress_Report.pdf",
-            "application/pdf",
-            use_container_width=True,
-            type="primary",
-        )
+    st.download_button(
+        "📥 Download Progress Report PDF",
+        create_pdf(st.session_state.student_report),
+        f"{profile.get('University_ID', 'Student')}_Progress_Report.pdf",
+        "application/pdf",
+        use_container_width=True,
+        type="primary",
+    )
 
 # Clear obsolete widget keys from earlier versions if they exist.
 for _old_key in ("active_department", "manual_department_selector", "manual_semester_selector"):
