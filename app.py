@@ -210,14 +210,14 @@ def inject_css():
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
     html, body, [class*="css"] {{ font-family: Inter, sans-serif; }}
-    .stApp {{ min-height:100vh; color:#eef2ff; background:#020617; overflow-x:hidden; }}
+    .stApp {{ min-height:100vh; color:#eef2ff; background:#020b1f; overflow-x:hidden; }}
     .stApp::before {{
         content:""; position:fixed; inset:-18%; z-index:-5; pointer-events:none;
         background:
-          radial-gradient(circle at 15% 20%, rgba(34,211,238,.20), transparent 22%),
-          radial-gradient(circle at 85% 28%, rgba(99,102,241,.18), transparent 24%),
-          radial-gradient(circle at 55% 90%, rgba(59,130,246,.14), transparent 26%),
-          linear-gradient(125deg,#020617,#0b1024 50%,#020617);
+          radial-gradient(circle at 15% 20%, rgba(14,165,233,.28), transparent 22%),
+          radial-gradient(circle at 85% 28%, rgba(37,99,235,.26), transparent 24%),
+          radial-gradient(circle at 55% 90%, rgba(59,130,246,.20), transparent 26%),
+          linear-gradient(125deg,#020817,#08204a 48%,#020817);
         animation:bgshift 16s ease-in-out infinite alternate;
     }}
     .stApp::after {{
@@ -268,9 +268,9 @@ def inject_css():
     .good-pop,.sad-pop {{ padding:25px;border-radius:24px;text-align:center;animation:pop .55s ease-out; }}
     .good-pop {{ background:linear-gradient(135deg,rgba(34,197,94,.20),rgba(16,185,129,.08));border:1px solid rgba(74,222,128,.45); }}
     .sad-pop {{ background:linear-gradient(135deg,rgba(239,68,68,.18),rgba(127,29,29,.08));border:1px solid rgba(248,113,113,.42); }}
-    .smart-card {{ width:min(560px,100%); margin:12px auto; padding:24px; border-radius:24px; background:linear-gradient(135deg,#0f172a,#1e3a8a,#312e81); border:1px solid rgba(255,255,255,.18); box-shadow:0 22px 60px rgba(0,0,0,.35); }}
+    .smart-card {{ width:min(500px,100%); margin:12px auto; padding:20px; border-radius:20px; background:linear-gradient(135deg,#06142e,#0b4aa2,#123f8f); border:1px solid rgba(255,255,255,.18); box-shadow:0 22px 60px rgba(0,0,0,.35); }}
     .smart-card .small {{ color:#cbd5e1; font-size:.72rem; letter-spacing:.12em; text-transform:uppercase; }}
-    .smart-card .name {{ font-size:1.55rem; font-weight:800; margin:10px 0 4px; }} .smart-card .uid {{ font-family:monospace; font-size:1.05rem; letter-spacing:.08em; }}
+    .smart-card .name {{ font-size:1.75rem; font-weight:800; margin:10px 0 4px; }} .smart-card .uid {{ font-family:monospace; font-size:1.15rem; letter-spacing:.08em; }}
     @keyframes pop {{ from{{transform:scale(.82);opacity:0}} to{{transform:scale(1);opacity:1}} }}
     @media (prefers-reduced-motion: reduce) {{ .stApp::before,.stApp::after,.login-grid,.login-orb,.login-main-emoji,.dynamic-3d-wallpaper * {{ animation:none !important; }} }}
     </style>
@@ -561,7 +561,22 @@ def save_smart_card_registration(data):
     mask=df["University_ID"].astype(str).str.lower().eq(str(row["University_ID"]).lower())
     if mask.any(): df.loc[mask,list(row.keys())]=list(row.values())
     else: df=pd.concat([df,pd.DataFrame([row])],ignore_index=True)
-    df.to_csv(SMART_CARD_FILE,index=False); return row
+    df.to_csv(SMART_CARD_FILE,index=False)
+    try:
+        sb=_get_shared_supabase()
+        if sb is not None:
+            payload={
+                "registration_id": row["Registration_ID"], "university_id": row["University_ID"] or None,
+                "name": row["Student_Name"], "dob": row["DOB"] or None, "blood_group": row["Blood_Group"],
+                "address": row["Address"], "pin_code": row["PIN_Code"], "studied_college": row["Studied_College"],
+                "department": row["Department"], "semester": row["Semester"],
+                "cgpa": float(row["CGPA"]) if str(row["CGPA"]).strip() else None,
+                "university_name": row["University_Name"]
+            }
+            sb.table("smart_cards").upsert(payload, on_conflict="registration_id").execute()
+    except Exception:
+        pass
+    return row
 
 def find_smart_card_registration(uid):
     df=load_smart_card_registrations()
@@ -722,6 +737,31 @@ def normalize_subject(data):
     }
 
 
+def tutor_overall_credit_10(subjects):
+    """Compress all six tutor-entered subject scores into one student credit out of 10.
+    Tutor credit is calculated before student study-hours are entered.
+    """
+    if not subjects:
+        return 0.0
+    scores = []
+    for item in subjects:
+        try:
+            scores.append(float(item.get("Overall", 0.0)))
+        except Exception:
+            pass
+    return round(float(np.mean(scores)) / 10.0, 2) if scores else 0.0
+
+def automatic_prediction(credit_10):
+    """Project prediction band from the compressed student credit."""
+    c = float(credit_10)
+    if c >= 8.0:
+        return "Good"
+    if c >= 6.5:
+        return "Above Average"
+    if c >= 5.0:
+        return "Average"
+    return "Needs Improvement"
+
 def make_report(username, name, uid, semester, department, subjects):
     return {
         "Username": username.strip(),
@@ -780,7 +820,9 @@ def create_pdf(report):
     subjects = parse_subjects(report["Subjects_JSON"])
     overall = float(np.mean([x["Overall"] for x in subjects])) if subjects else 0
     overall_level = "Good" if overall >= 80 else "Above Average" if overall >= 65 else "Average" if overall >= 50 else "Needs Improvement"
-    story.append(Paragraph(f"<b>Overall Performance:</b> {overall:.2f}% &nbsp;&nbsp; <b>Status:</b> {performance_circle(overall_level)} {overall_level}", styles["Heading2"]))
+    tutor_credit = float(np.mean([float(x.get("Tutor_Credit_10", overall/10)) for x in subjects])) if subjects else 0.0
+    prediction = str(subjects[0].get("Automatic_Prediction", automatic_prediction(tutor_credit))) if subjects else automatic_prediction(tutor_credit)
+    story.append(Paragraph(f"<b>Overall Performance:</b> {overall:.2f}% &nbsp;&nbsp; <b>Student Credit:</b> {tutor_credit:.2f}/10 &nbsp;&nbsp; <b>Prediction:</b> {performance_circle(prediction)} {prediction}", styles["Heading2"]))
     story.append(Paragraph(f"<b>Subjects:</b> {len(subjects)} &nbsp;&nbsp; <b>Average Attendance:</b> {np.mean([x['Attendance'] for x in subjects]):.1f}% &nbsp;&nbsp; <b>Average Internal:</b> {np.mean([x['Internal'] for x in subjects]):.1f}/40", small))
     story.append(Spacer(1, 10))
 
@@ -1130,6 +1172,26 @@ def student_login():
             st.session_state.page="student_dashboard"; st.rerun()
         else: st.error("No registered student found for this University ID.")
 
+    st.divider()
+    st.subheader("👤 Quick Student Profile Lookup")
+    st.caption("Profile can be viewed using University ID + Student Name even when Tutor marks have not been entered yet.")
+    with st.form("quick_profile_lookup"):
+        q1,q2=st.columns(2)
+        lookup_uid=q1.text_input("University ID", key="quick_profile_uid")
+        lookup_name=q2.text_input("Student Name", key="quick_profile_name")
+        lookup=q1.form_submit_button("🔎 View Profile", use_container_width=True)
+    if lookup:
+        prof=find_student(lookup_name.strip(),lookup_uid.strip()) if lookup_uid.strip() and lookup_name.strip() else None
+        if prof:
+            st.success("✅ Student profile found. Tutor marks are not required to view this profile.")
+            st.dataframe(pd.DataFrame([{
+                "Student Name": prof.get("Student_Name",""), "University ID": prof.get("University_ID",""),
+                "Department": prof.get("Department",""), "Semester": prof.get("Semester",""),
+                "Registered Time": prof.get("Registered_Time","")
+            }]), use_container_width=True, hide_index=True)
+        else:
+            st.error("Profile not found. Check the University ID and Student Name.")
+
 
 def smart_card_page():
     app_brand(); st.title("🪪 Student Smart Card Registration"); st.caption("Submit smart-card details. The Principal portal can view the submitted registration details.")
@@ -1284,6 +1346,11 @@ def tutor_mark_entry(department, semester):
     if regs.empty:
         st.info("No registered students are available for this Tutor + Department + Semester. Register a student first.")
         return
+
+    tutor_profile = get_tutor_profile(st.session_state.username)
+    default_tutor_name = str(tutor_profile.get("Tutor_Name", "")).strip() or st.session_state.username
+    tutor_credit = float(tutor_profile.get("Credit_Score", 0) or 0)
+
     labels = {f"{r['University_ID']} — {r['Student_Name']}": r for _, r in regs.iterrows()}
     selected_label = st.selectbox("Select registered student", list(labels.keys()), key="mark_entry_student")
     selected = labels[selected_label]
@@ -1292,7 +1359,10 @@ def tutor_mark_entry(department, semester):
     old = existing[existing["University_ID"].astype(str).eq(str(selected["University_ID"]))] if not existing.empty else pd.DataFrame()
     old_subs = parse_subjects(old.iloc[0]["Subjects_JSON"]) if not old.empty else []
     old_map = {x.get("Subject"): x for x in old_subs}
+
+    st.info(f"👨‍🏫 Tutor: **{default_tutor_name}**  •  Tutor Credit: **{tutor_credit:.2f}/10**")
     with st.form("mark_entry_form"):
+        tutor_name = st.text_input("👨‍🏫 Tutor Name *", value=default_tutor_name)
         values = []
         for i, subject in enumerate(subjects):
             oldx = old_map.get(subject, {})
@@ -1302,26 +1372,41 @@ def tutor_mark_entry(department, semester):
             internal = b.number_input("Internal /40", 0.0, 40.0, float(oldx.get("Internal",20)), 1.0, key=f"m_int_{i}_{selected['University_ID']}")
             assignment = c.number_input("Assignment /15", 0.0, 15.0, float(oldx.get("Assignment",8)), 1.0, key=f"m_asg_{i}_{selected['University_ID']}")
             previous = d.number_input("Previous /60", 0.0, 60.0, float(oldx.get("Previous",30)), 1.0, key=f"m_prev_{i}_{selected['University_ID']}")
-            values.append(normalize_subject({"Subject":subject,"Attendance":att,"Study_Hours":float(oldx.get("Study_Hours",0)),"Internal":internal,"Assignment":assignment,"Previous":previous}))
-        completed = st.checkbox("✅ Mark this Tutor work as COMPLETED", value=False, help="Completed work is sent to the Principal dashboard and included in tutor salary analysis.")
-        submitted = st.form_submit_button("💾 Submit Marks", type="primary", use_container_width=True)
+            values.append(normalize_subject({"Subject":subject,"Study_Hours":0,"Attendance":att,"Internal":internal,"Assignment":assignment,"Previous":previous}))
+
+        completed = st.checkbox("✅ Completed — include this Tutor work in Principal salary analysis", value=False, help="Only completed tutor work is counted for salary.")
+        submitted = st.form_submit_button("💾 Submit Marks + Predict + Calculate Credit", type="primary", use_container_width=True)
+
     if submitted:
+        if not tutor_name.strip():
+            st.error("Tutor Name is required.")
+            return
         if len(subjects) != 6:
             st.error("Exactly 6 subjects are required.")
             return
+
+        credit_10 = tutor_overall_credit_10(values)
+        prediction = automatic_prediction(credit_10)
+        for item in values:
+            item["Tutor_Name"] = tutor_name.strip()
+            item["Tutor_Credit_10"] = credit_10
+            item["Automatic_Prediction"] = prediction
+            item["Tutor_Completed"] = bool(completed)
+
         report = make_report("", selected["Student_Name"], selected["University_ID"], semester, department, values)
         upsert_report(report)
-        audit("Student Mark Submission", "Tutor", st.session_state.username, selected["University_ID"], department, semester, "Marks submitted")
+        # Explicitly sync tutor identity + credit to the shared Principal portal.
+        save_tutor_profile(st.session_state.username, tutor_name.strip(), department, tutor_credit)
+        audit("Student Mark Submission", "Tutor", st.session_state.username, selected["University_ID"], department, semester,
+              f"Tutor={tutor_name.strip()}; Automatic Prediction={prediction}; Student Credit={credit_10:.2f}/10")
         if completed:
-            # Store an explicit completion event. Principal salary is based only on this event.
-            credit = float(np.mean([float(x.get("Overall", 0)) for x in values])) / 10 if values else 0.0
             audit("Tutor Work Completed", "Tutor", st.session_state.username, selected["University_ID"], department, semester,
-                  f"Tutor work completed; Student Credit: {credit:.2f}/10; Salary eligible: Yes")
-            st.success(f"✅ {selected['Student_Name']} saved. 🟢 Tutor work marked COMPLETED and sent to Principal.")
+                  f"Tutor={tutor_name.strip()}; Student Credit={credit_10:.2f}/10; Prediction={prediction}; Salary eligible=Yes")
+            st.success(f"✅ Marks saved • Automatic Prediction: **{prediction}** • Overall Student Credit: **{credit_10:.2f}/10** • 🟢 Tutor work COMPLETED")
         else:
             audit("Tutor Work Saved - Pending Completion", "Tutor", st.session_state.username, selected["University_ID"], department, semester,
-                  "Tutor work saved; Salary eligible: No until marked Completed")
-            st.success(f"✅ Marks saved for {selected['Student_Name']}. 🟡 Work remains Pending.")
+                  f"Tutor={tutor_name.strip()}; Student Credit={credit_10:.2f}/10; Prediction={prediction}; Salary eligible=No")
+            st.success(f"✅ Marks saved • Automatic Prediction: **{prediction}** • Overall Student Credit: **{credit_10:.2f}/10** • 🟡 Pending")
         st.rerun()
 
 
@@ -1486,6 +1571,8 @@ def student_dashboard():
 
     subjects=parse_subjects(st.session_state.student_report["Subjects_JSON"])
     overall=float(np.mean([x["Overall"] for x in subjects])) if subjects else 0
+    tutor_credit=float(np.mean([float(x.get("Tutor_Credit_10", overall/10)) for x in subjects])) if subjects else 0.0
+    tutor_prediction=str(subjects[0].get("Automatic_Prediction", automatic_prediction(tutor_credit))) if subjects else automatic_prediction(tutor_credit)
     if any(float(x.get("Study_Hours",0))>0 for x in subjects):
         if overall>=80:
             st.balloons(); st.markdown(f'<div class="good-pop"><div style="font-size:3rem">🎉🏆</div><h2>Good Performance</h2><p>Keep your consistency. Overall score: <b>{overall:.2f}%</b></p></div>',unsafe_allow_html=True)
@@ -1498,6 +1585,9 @@ def student_dashboard():
         b.markdown(f'<div class="metric-card"><div class="label">Subjects</div><div class="value">{len(subjects)}</div></div>',unsafe_allow_html=True)
         status="Good" if overall>=80 else "Above Average" if overall>=65 else "Average" if overall>=50 else "Needs Improvement"
         c.markdown(f'<div class="metric-card"><div class="label">Status</div><div class="value">{status}</div></div>',unsafe_allow_html=True)
+        d1,d2=st.columns(2)
+        d1.markdown(f'<div class="metric-card"><div class="label">Tutor Overall Credit</div><div class="value">{tutor_credit:.2f}/10</div></div>',unsafe_allow_html=True)
+        d2.markdown(f'<div class="metric-card"><div class="label">Automatic Prediction</div><div class="value">{tutor_prediction}</div></div>',unsafe_allow_html=True)
         rows=[]
         for x in subjects:
             rows.append([x["Subject"],f"{x['Attendance']:.0f}%",f"{x.get('Attendance_Mark',attendance_mark(x['Attendance']))}/5",f"{x['Internal']:.0f}/40",f"{x['Assignment']:.0f}/15",f"{x['Previous']:.0f}/60",f"{x['Study_Hours']:.1f} h",f"{x['Overall']:.1f}%",f"{x.get('Circle',performance_circle(x['Level']))} {x['Level']}"])
