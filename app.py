@@ -5,6 +5,8 @@ import os
 import io
 import json
 import re
+import base64
+from pathlib import Path
 from datetime import datetime
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
@@ -13,14 +15,23 @@ from reportlab.lib import colors
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak
 
 try:
+    from PIL import Image, ImageDraw, ImageFont
+    PIL_AVAILABLE = True
+except Exception:
+    PIL_AVAILABLE = False
+
+try:
+    from streamlit_autorefresh import st_autorefresh
+    AUTOREFRESH_AVAILABLE = True
+except Exception:
+    AUTOREFRESH_AVAILABLE = False
+
+try:
     from sklearn.cluster import KMeans
     from sklearn.preprocessing import StandardScaler
-    from sklearn.neural_network import MLPClassifier
     SKLEARN_AVAILABLE = True
-    ANN_AVAILABLE = True
 except Exception:
     SKLEARN_AVAILABLE = False
-    ANN_AVAILABLE = False
 
 # ============================================================
 # CONFIG
@@ -35,12 +46,11 @@ st.set_page_config(
 DATA_DIR = "data"
 os.makedirs(DATA_DIR, exist_ok=True)
 REPORT_FILE = os.path.join(DATA_DIR, "student_reports.csv")
-# Permanent local archive: every submitted student record is also saved as
-# an individual JSON snapshot. Tutor actions never delete archived records.
-STUDENT_RECORDS_DIR = os.path.join(DATA_DIR, "student_records")
-STUDENT_REGISTRATIONS_FILE = os.path.join(DATA_DIR, "student_registrations.csv")
-AUDIT_LOG_FILE = os.path.join(DATA_DIR, "audit_log.csv")
-os.makedirs(STUDENT_RECORDS_DIR, exist_ok=True)
+REGISTRATION_FILE = os.path.join(DATA_DIR, "student_registrations.csv")
+TUTOR_PROFILE_FILE = os.path.join(DATA_DIR, "tutor_profiles.csv")
+AUDIT_FILE = os.path.join(DATA_DIR, "audit_log.csv")
+STUDENT_FILES_DIR = os.path.join(DATA_DIR, "student_files")
+os.makedirs(STUDENT_FILES_DIR, exist_ok=True)
 
 SEMESTERS = [f"S{i}" for i in range(1, 9)]
 
@@ -163,6 +173,9 @@ REPORT_COLUMNS = [
     "Username", "Student_Name", "University_ID", "Semester", "Department",
     "Subjects_JSON", "Created_Time"
 ]
+REGISTRATION_COLUMNS = ["University_ID", "Student_Name", "Department", "Semester", "Tutor_Username", "Registered_Time"]
+TUTOR_PROFILE_COLUMNS = ["Tutor_Username", "Department", "Credit_Score", "Updated_Time"]
+AUDIT_COLUMNS = ["Timestamp", "Role", "Username", "Action", "University_ID", "Department", "Semester", "Details"]
 
 # ============================================================
 # SESSION STATE
@@ -171,8 +184,7 @@ DEFAULT_STATE = {
     "page": "home", "logged_in": False, "role": None, "username": None,
     "teacher_department": None, "student_report": None,
     "dashboard_view": "department",
-    "teacher_menu_view": "menu",
-    "intro_seen": False,
+    "student_registration": None,
 }
 for key, value in DEFAULT_STATE.items():
     if key not in st.session_state:
@@ -182,102 +194,58 @@ for key, value in DEFAULT_STATE.items():
 # UI
 # ============================================================
 def inject_css():
-    st.markdown("""
+    minute = datetime.now().minute
+    st.markdown(f"""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
-    html, body, [class*="css"] { font-family: Inter, sans-serif; }
-
-    /* FULL-PAGE DYNAMIC 3D BACKGROUND */
-    .stApp {
-        min-height:100vh;
-        color:#eef2ff;
-        background:#030712;
-        overflow-x:hidden;
-    }
-    .stApp::before {
-        content:""; position:fixed; inset:-20%; z-index:-5; pointer-events:none;
+    html, body, [class*="css"] {{ font-family: Inter, sans-serif; }}
+    .stApp {{ min-height:100vh; color:#eef2ff; background:#020617; overflow-x:hidden; }}
+    .stApp::before {{
+        content:""; position:fixed; inset:-18%; z-index:-5; pointer-events:none;
         background:
-          radial-gradient(circle at 20% 25%, rgba(34,211,238,.22), transparent 22%),
-          radial-gradient(circle at 80% 30%, rgba(139,92,246,.24), transparent 24%),
-          radial-gradient(circle at 55% 85%, rgba(59,130,246,.18), transparent 25%),
-          linear-gradient(120deg,#020617,#0b1024 45%,#020617);
-        animation:bgshift 18s ease-in-out infinite alternate;
-        transform:translateZ(0);
-    }
-    .stApp::after {
-        content:""; position:fixed; inset:0; z-index:-4; pointer-events:none; opacity:.22;
-        background-image:
-          linear-gradient(rgba(125,211,252,.18) 1px, transparent 1px),
-          linear-gradient(90deg, rgba(125,211,252,.18) 1px, transparent 1px);
-        background-size:55px 55px;
-        transform:perspective(650px) rotateX(58deg) scale(1.8);
-        transform-origin:center bottom;
-        animation:grid3d 9s linear infinite;
-    }
-    @keyframes bgshift {
-        0% { transform:scale(1) rotate(0deg); filter:hue-rotate(0deg); }
-        50% { transform:scale(1.08) rotate(1deg); filter:hue-rotate(18deg); }
-        100% { transform:scale(1.02) rotate(-1deg); filter:hue-rotate(-12deg); }
-    }
-    @keyframes grid3d {
-        from { background-position:0 0,0 0; }
-        to { background-position:0 110px,110px 0; }
-    }
-    .block-container { max-width:1250px; padding-top:2rem; position:relative; z-index:2; }
-    .hero,.login-wrap { position:relative; overflow:hidden; border:1px solid rgba(255,255,255,.14); border-radius:28px; background:linear-gradient(135deg,rgba(5,12,30,.78),rgba(15,23,42,.58)); box-shadow:0 25px 100px rgba(0,0,0,.45); backdrop-filter:blur(14px); }
-    .hero { padding:45px 40px; }
-    .hero h1 { font-size:clamp(2rem,5vw,4rem); margin:0; font-weight:800; letter-spacing:-2px; }
-    .hero p { color:#b7c2d9; font-size:1.05rem; max-width:760px; }
-    .login-wrap { min-height:430px; display:flex; align-items:center; justify-content:center; }
-    .grid3d { position:absolute; inset:0; opacity:.18; background-image:linear-gradient(rgba(255,255,255,.12) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.12) 1px,transparent 1px); background-size:42px 42px; transform:perspective(500px) rotateX(62deg) scale(1.7); transform-origin:center bottom; animation:gridmove 8s linear infinite; }
-    @keyframes gridmove { from{background-position:0 0,0 0} to{background-position:0 84px,84px 0} }
-    .orb { position:absolute; width:180px;height:180px;border-radius:50%;opacity:.45;background:radial-gradient(circle at 30% 30%,#67e8f9,#2563eb 55%,transparent 70%);animation:float 7s ease-in-out infinite; filter:blur(.2px); }
-    .orb.o1 { right:5%;top:-45px; } .orb.o2 { left:45%;bottom:-110px;width:230px;height:230px;background:radial-gradient(circle at 30% 30%,#c084fc,#7c3aed 55%,transparent 70%);animation-delay:1.5s; }
-    @keyframes float { 0%,100%{transform:translate3d(0,0,0) rotate(0deg)} 50%{transform:translate3d(22px,28px,35px) rotate(8deg)} }
-    .glass { background:rgba(15,23,42,.68);border:1px solid rgba(255,255,255,.14);border-radius:22px;padding:24px;backdrop-filter:blur(18px); }
-    .metric-card { padding:20px;border-radius:20px;border:1px solid rgba(255,255,255,.10);background:linear-gradient(135deg,rgba(30,41,59,.75),rgba(15,23,42,.7)); }
-
-    /* DYNAMIC 3D OBJECT FIELD */
-    .stApp .three-d-field { position:fixed; inset:0; z-index:-3; pointer-events:none; overflow:hidden; perspective:900px; }
-    .three-d-object { position:absolute; transform-style:preserve-3d; opacity:.55; filter:drop-shadow(0 0 18px rgba(96,165,250,.28)); }
-    .cube { width:90px;height:90px; left:8%;top:20%; animation:cubeFloat 12s ease-in-out infinite; }
-    .cube::before,.cube::after { content:""; position:absolute; inset:0; border:2px solid rgba(125,211,252,.45); background:rgba(59,130,246,.035); }
-    .cube::before { transform:rotateY(60deg); } .cube::after { transform:rotateX(60deg); }
-    .ring3d { width:150px;height:150px; right:7%;top:18%; border:3px solid rgba(196,181,253,.45); border-radius:50%; animation:ringFloat 10s linear infinite; box-shadow:0 0 30px rgba(139,92,246,.22); }
-    .ring3d::after { content:""; position:absolute; inset:18px; border:1px dashed rgba(125,211,252,.35); border-radius:50%; transform:rotateX(65deg); }
-    .sphere3d { width:115px;height:115px; left:45%;bottom:8%; border-radius:50%; background:radial-gradient(circle at 30% 25%,rgba(255,255,255,.65),rgba(59,130,246,.35) 16%,rgba(30,64,175,.12) 58%,transparent 70%); animation:sphereFloat 9s ease-in-out infinite; box-shadow:0 0 45px rgba(59,130,246,.18); }
-    .diamond3d { width:70px;height:70px; right:28%;bottom:24%; border:2px solid rgba(74,222,128,.32); transform:rotate(45deg); animation:diamondFloat 11s ease-in-out infinite; }
-    @keyframes cubeFloat { 0%,100%{transform:translate3d(0,0,0) rotateX(0) rotateY(0)} 50%{transform:translate3d(80px,-50px,120px) rotateX(180deg) rotateY(220deg)} }
-    @keyframes ringFloat { 0%{transform:rotateX(65deg) rotateY(0) translate3d(0,0,0)} 50%{transform:rotateX(110deg) rotateY(180deg) translate3d(-40px,55px,100px)} 100%{transform:rotateX(65deg) rotateY(360deg) translate3d(0,0,0)} }
-    @keyframes sphereFloat { 0%,100%{transform:translate3d(0,0,0) scale(1)} 50%{transform:translate3d(-70px,-80px,140px) scale(1.15)} }
-    @keyframes diamondFloat { 0%,100%{transform:translate3d(0,0,0) rotate(45deg) rotateX(0)} 50%{transform:translate3d(60px,-70px,90px) rotate(225deg) rotateX(180deg)} }
-
-    .brand-bar { display:flex; align-items:center; gap:14px; margin:0 0 22px; padding:10px 14px; width:max-content; border:1px solid rgba(125,211,252,.20); border-radius:18px; background:rgba(2,6,23,.48); backdrop-filter:blur(12px); box-shadow:0 10px 35px rgba(0,0,0,.22); }
-    .brand-mark { width:58px;height:58px; flex:0 0 58px; border-radius:17px; display:grid; place-items:center; background:linear-gradient(135deg,#22d3ee,#6366f1 55%,#a855f7); box-shadow:0 0 28px rgba(99,102,241,.42); }
-    .brand-name { font-weight:900; letter-spacing:.4px; font-size:1.05rem; color:#f8fafc; }
-    .brand-tag { color:#94a3b8; font-size:.72rem; margin-top:2px; }
-    .subject-card { border:1px solid rgba(255,255,255,.10); border-radius:18px; padding:15px; background:rgba(15,23,42,.58); margin:8px 0; }
-    .status-dot { display:inline-block; width:11px; height:11px; border-radius:50%; margin-right:7px; box-shadow:0 0 10px currentColor; }
-
-    .metric-card .value{font-size:2rem;font-weight:800}.metric-card .label{color:#94a3b8}
-    .good-pop,.sad-pop { padding:25px;border-radius:24px;text-align:center;animation:pop .55s ease-out; }
-    .good-pop { background:linear-gradient(135deg,rgba(34,197,94,.20),rgba(16,185,129,.08));border:1px solid rgba(74,222,128,.45); }
-    .sad-pop { background:linear-gradient(135deg,rgba(239,68,68,.18),rgba(127,29,29,.08));border:1px solid rgba(248,113,113,.42); }
-    @keyframes pop { from{transform:scale(.82);opacity:0} to{transform:scale(1);opacity:1} }
-    .intro3d{position:relative;min-height:520px;display:flex;flex-direction:column;align-items:center;justify-content:center;overflow:hidden;border:1px solid rgba(125,211,252,.18);border-radius:30px;background:radial-gradient(circle at center,rgba(30,41,59,.7),rgba(2,6,23,.92));perspective:900px;animation:introFade 7s ease-in-out forwards;}
-    .intro-glow{position:absolute;width:420px;height:420px;border-radius:50%;background:radial-gradient(circle,rgba(34,211,238,.28),transparent 65%);filter:blur(8px);animation:glowPulse 2.5s ease-in-out infinite;}
-    .intro-logo3d{position:relative;font-size:6rem;filter:drop-shadow(0 0 28px rgba(34,211,238,.8));animation:logoFloat 3s ease-in-out infinite;}
-    .intro-title{position:relative;font-size:clamp(2.5rem,6vw,5rem);font-weight:900;letter-spacing:3px;text-transform:uppercase;background:linear-gradient(90deg,#67e8f9,#c4b5fd,#f0abfc);-webkit-background-clip:text;color:transparent;text-shadow:0 0 35px rgba(99,102,241,.35);animation:titleIn 1.5s ease-out;}
-    .intro-subtitle{position:relative;color:#cbd5e1;margin-top:10px;letter-spacing:2px;text-align:center;}
-    .intro-cube{position:relative;width:150px;height:150px;margin:32px 0;transform-style:preserve-3d;animation:spinCube 6s linear infinite;}
-    .intro-cube:before,.intro-cube:after{content:"";position:absolute;inset:0;border:2px solid rgba(103,232,249,.65);background:rgba(99,102,241,.08);box-shadow:0 0 30px rgba(34,211,238,.3);}
-    .intro-cube:before{transform:rotateY(60deg)} .intro-cube:after{transform:rotateX(60deg)}
-    .intro-cube span{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);font-size:.7rem;font-weight:800;letter-spacing:1px;color:#e0f2fe;}
-    .intro-loading{position:relative;font-size:.72rem;letter-spacing:3px;color:#67e8f9;animation:blink 1s infinite;}
-    @keyframes introFade{0%,78%{opacity:1;transform:scale(1)}100%{opacity:.15;transform:scale(.98)}}
-    @keyframes glowPulse{50%{transform:scale(1.25);opacity:.65}} @keyframes logoFloat{50%{transform:translateY(-18px) rotateY(18deg)}}
-    @keyframes titleIn{from{opacity:0;transform:translateY(25px) scale(.9)}to{opacity:1;transform:none}} @keyframes spinCube{to{transform:rotateX(360deg) rotateY(360deg) rotateZ(360deg)}} @keyframes blink{50%{opacity:.35}}
-    @media (prefers-reduced-motion: reduce) { .stApp::before,.stApp::after,.grid3d,.orb { animation:none !important; } }
+          radial-gradient(circle at 15% 20%, rgba(34,211,238,.20), transparent 22%),
+          radial-gradient(circle at 85% 28%, rgba(99,102,241,.18), transparent 24%),
+          radial-gradient(circle at 55% 90%, rgba(59,130,246,.14), transparent 26%),
+          linear-gradient(125deg,#020617,#0b1024 50%,#020617);
+        animation:bgshift 16s ease-in-out infinite alternate;
+    }}
+    .stApp::after {{
+        content:""; position:fixed; inset:0; z-index:-4; pointer-events:none; opacity:.18;
+        background-image:linear-gradient(rgba(125,211,252,.16) 1px,transparent 1px),linear-gradient(90deg,rgba(125,211,252,.16) 1px,transparent 1px);
+        background-size:60px 60px; transform:perspective(700px) rotateX(58deg) scale(1.7);
+        transform-origin:center bottom; animation:grid3d 10s linear infinite;
+    }}
+    @keyframes bgshift {{ 0%{{transform:scale(1)}} 50%{{transform:scale(1.06) rotate(.5deg)}} 100%{{transform:scale(1.02) rotate(-.5deg)}} }}
+    @keyframes grid3d {{ from{{background-position:0 0,0 0}} to{{background-position:0 120px,120px 0}} }}
+    .block-container {{ max-width:1250px; padding-top:2rem; position:relative; z-index:2; }}
+    .hero,.login-wrap {{ position:relative; overflow:hidden; border:1px solid rgba(255,255,255,.13); border-radius:28px; background:linear-gradient(135deg,rgba(5,12,30,.80),rgba(15,23,42,.62)); box-shadow:0 25px 90px rgba(0,0,0,.42); backdrop-filter:blur(14px); }}
+    .hero {{ padding:45px 40px; }}
+    .hero h1 {{ font-size:clamp(2rem,5vw,4rem); margin:0; font-weight:800; letter-spacing:-2px; }}
+    .hero p {{ color:#b7c2d9; font-size:1.05rem; max-width:760px; }}
+    .login-wrap {{ min-height:430px; display:flex; align-items:center; justify-content:center; }}
+    .login-grid {{ position:absolute; inset:0; opacity:.20; background-image:linear-gradient(rgba(255,255,255,.12) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.12) 1px,transparent 1px); background-size:44px 44px; transform:perspective(520px) rotateX(62deg) scale(1.7); transform-origin:center bottom; animation:gridmove 9s linear infinite; }}
+    .login-orb {{ position:absolute; width:170px; height:170px; border-radius:50%; background:radial-gradient(circle at 30% 30%,#67e8f9,#2563eb 55%,transparent 70%); opacity:.38; animation:float 8s ease-in-out infinite; }}
+    .login-orb.one {{ right:5%; top:-45px; }} .login-orb.two {{ left:8%; bottom:-100px; width:210px; height:210px; background:radial-gradient(circle at 30% 30%,#a78bfa,#6366f1 55%,transparent 70%); animation-delay:1.4s; }}
+    @keyframes gridmove {{ from{{background-position:0 0,0 0}} to{{background-position:0 88px,88px 0}} }}
+    @keyframes float {{ 0%,100%{{transform:translate3d(0,0,0)}} 50%{{transform:translate3d(20px,-22px,30px)}} }}
+    .login-main-emoji {{ font-size:4rem; filter:drop-shadow(0 0 18px rgba(125,211,252,.35)); animation:emojiFloat 3.5s ease-in-out infinite; }}
+    @keyframes emojiFloat {{ 0%,100%{{transform:translateY(0) scale(1)}} 50%{{transform:translateY(-9px) scale(1.04)}} }}
+    .minute-badge {{ margin:10px auto 0; padding:7px 12px; width:max-content; border-radius:999px; background:rgba(15,23,42,.58); border:1px solid rgba(255,255,255,.10); color:#cbd5e1; font-size:.78rem; }}
+    .glass {{ background:rgba(15,23,42,.68); border:1px solid rgba(255,255,255,.14); border-radius:22px; padding:24px; backdrop-filter:blur(18px); }}
+    .metric-card {{ padding:20px; border-radius:20px; border:1px solid rgba(255,255,255,.10); background:linear-gradient(135deg,rgba(30,41,59,.75),rgba(15,23,42,.7)); }}
+    .metric-card .value{{font-size:2rem;font-weight:800}} .metric-card .label{{color:#94a3b8}}
+    .brand-bar {{ display:flex; align-items:center; gap:14px; margin:0 0 22px; padding:10px 14px; width:max-content; border:1px solid rgba(125,211,252,.20); border-radius:18px; background:rgba(2,6,23,.48); backdrop-filter:blur(12px); }}
+    .brand-mark {{ width:58px;height:58px; flex:0 0 58px; border-radius:17px; display:grid; place-items:center; background:linear-gradient(135deg,#22d3ee,#6366f1 55%,#a855f7); box-shadow:0 0 28px rgba(99,102,241,.42); }}
+    .brand-name {{ font-weight:900; letter-spacing:.4px; font-size:1.05rem; color:#f8fafc; }} .brand-tag {{ color:#94a3b8; font-size:.72rem; margin-top:2px; }}
+    .subject-card {{ border:1px solid rgba(255,255,255,.10); border-radius:18px; padding:15px; background:rgba(15,23,42,.58); margin:8px 0; }}
+    .good-pop,.sad-pop {{ padding:25px;border-radius:24px;text-align:center;animation:pop .55s ease-out; }}
+    .good-pop {{ background:linear-gradient(135deg,rgba(34,197,94,.20),rgba(16,185,129,.08));border:1px solid rgba(74,222,128,.45); }}
+    .sad-pop {{ background:linear-gradient(135deg,rgba(239,68,68,.18),rgba(127,29,29,.08));border:1px solid rgba(248,113,113,.42); }}
+    .smart-card {{ width:min(560px,100%); margin:12px auto; padding:24px; border-radius:24px; background:linear-gradient(135deg,#0f172a,#1e3a8a,#312e81); border:1px solid rgba(255,255,255,.18); box-shadow:0 22px 60px rgba(0,0,0,.35); }}
+    .smart-card .small {{ color:#cbd5e1; font-size:.72rem; letter-spacing:.12em; text-transform:uppercase; }}
+    .smart-card .name {{ font-size:1.55rem; font-weight:800; margin:10px 0 4px; }} .smart-card .uid {{ font-family:monospace; font-size:1.05rem; letter-spacing:.08em; }}
+    @keyframes pop {{ from{{transform:scale(.82);opacity:0}} to{{transform:scale(1);opacity:1}} }}
+    @media (prefers-reduced-motion: reduce) {{ .stApp::before,.stApp::after,.login-grid,.login-orb,.login-main-emoji {{ animation:none !important; }} }}
     </style>
     """, unsafe_allow_html=True)
 
@@ -288,14 +256,9 @@ def app_brand():
         <svg width="42" height="42" viewBox="0 0 64 64" aria-label="EduPredict SPP logo">
           <path d="M8 24 32 10l24 14-24 14L8 24Z" fill="none" stroke="white" stroke-width="3"/>
           <path d="M16 29v14c8 8 24 8 32 0V29M32 38v14" fill="none" stroke="white" stroke-width="3" stroke-linecap="round"/>
-          <circle cx="48" cy="18" r="5" fill="white" opacity=".9"/>
         </svg>
       </div>
-      <div><div class="brand-name">EduPredict SPP</div><div class="brand-tag">Student Performance Prediction • KTU B.Tech • ANN + K-Means</div></div>
-    </div>
-    <div class="three-d-field" aria-hidden="true">
-      <div class="three-d-object cube"></div><div class="three-d-object ring3d"></div>
-      <div class="three-d-object sphere3d"></div><div class="three-d-object diamond3d"></div>
+      <div><div class="brand-name">EduPredict SPP</div><div class="brand-tag">Student Performance Prediction • KTU B.Tech</div></div>
     </div>
     """, unsafe_allow_html=True)
 
@@ -307,87 +270,6 @@ inject_css()
 def empty_df():
     return pd.DataFrame(columns=REPORT_COLUMNS)
 
-
-REGISTRATION_COLUMNS = ["Username", "University_ID", "Student_Name", "Department", "Semester", "Tutor_Username", "Registered_Time"]
-AUDIT_COLUMNS = ["Timestamp", "Role", "Username", "Action", "University_ID", "Department", "Semester", "Details"]
-
-def empty_registration_df():
-    return pd.DataFrame(columns=REGISTRATION_COLUMNS)
-
-def load_registrations():
-    if not os.path.exists(STUDENT_REGISTRATIONS_FILE):
-        return empty_registration_df()
-    try:
-        df = pd.read_csv(STUDENT_REGISTRATIONS_FILE)
-        for col in REGISTRATION_COLUMNS:
-            if col not in df.columns:
-                df[col] = ""
-        return df[REGISTRATION_COLUMNS]
-    except Exception:
-        return empty_registration_df()
-
-def save_registrations(df):
-    df.to_csv(STUDENT_REGISTRATIONS_FILE, index=False)
-
-def log_action(role, username, action, university_id="", department="", semester="", details=""):
-    """Local audit trail used by the separate Principal monitoring app."""
-    row = pd.DataFrame([{
-        "Timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        "Role": role, "Username": username, "Action": action,
-        "University_ID": university_id, "Department": department,
-        "Semester": semester, "Details": details,
-    }], columns=AUDIT_COLUMNS)
-    try:
-        if os.path.exists(AUDIT_LOG_FILE):
-            old = pd.read_csv(AUDIT_LOG_FILE)
-            for col in AUDIT_COLUMNS:
-                if col not in old.columns: old[col] = ""
-            old = old[AUDIT_COLUMNS]
-        else:
-            old = pd.DataFrame(columns=AUDIT_COLUMNS)
-        pd.concat([old, row], ignore_index=True).to_csv(AUDIT_LOG_FILE, index=False)
-    except Exception:
-        pass
-
-def register_student(username, uid, name, department, semester, tutor_username):
-    username, uid, name = username.strip(), uid.strip(), name.strip()
-    department, semester, tutor_username = department.strip(), semester.strip().upper(), tutor_username.strip()
-    df = load_registrations()
-    if not username or not uid or not name or not department or not semester:
-        return False, "Enter Username, University ID, Student Name, Department and Semester."
-    if department not in DEPARTMENTS or semester not in SEMESTERS:
-        return False, "Select a valid B.Tech Department and Semester."
-    duplicate = df[
-        df["University_ID"].astype(str).str.strip().str.lower().eq(uid.lower()) |
-        df["Username"].astype(str).str.strip().str.lower().eq(username.lower())
-    ]
-    if not duplicate.empty:
-        return False, "This Username or University ID is already registered."
-    row = pd.DataFrame([{
-        "Username": username, "University_ID": uid, "Student_Name": name,
-        "Department": department, "Semester": semester,
-        "Tutor_Username": tutor_username,
-        "Registered_Time": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    }], columns=REGISTRATION_COLUMNS)
-    save_registrations(pd.concat([df, row], ignore_index=True))
-    log_action("Tutor", tutor_username, "Student Registration", uid, department, semester, f"Registered {name}")
-    return True, f"Student {name} registered successfully for {department} — {semester}."
-
-def find_registered_student(uid):
-    df = load_registrations()
-    if df.empty: return None
-    found = df[df["University_ID"].astype(str).str.strip().str.lower().eq(str(uid).strip().lower())]
-    return found.iloc[-1].to_dict() if not found.empty else None
-
-def find_registered_credentials(username, uid):
-    """Find a tutor-registered student using both Username and University ID."""
-    df = load_registrations()
-    if df.empty: return None
-    found = df[
-        df["Username"].astype(str).str.strip().str.lower().eq(str(username).strip().lower()) &
-        df["University_ID"].astype(str).str.strip().str.lower().eq(str(uid).strip().lower())
-    ]
-    return found.iloc[-1].to_dict() if not found.empty else None
 
 def load_reports():
     if not os.path.exists(REPORT_FILE):
@@ -406,96 +288,26 @@ def save_reports(df):
     df.to_csv(REPORT_FILE, index=False)
 
 
-def _safe_folder_name(value):
-    """Make a Windows/Linux-safe folder/file component."""
-    text = re.sub(r"[^A-Za-z0-9._-]+", "_", str(value).strip())
-    return text.strip("._") or "Unknown"
-
-
-def archive_student_record(report):
-    """Write an immutable snapshot of every submitted record to a proper folder.
-
-    Nothing in the tutor UI deletes these snapshots. A new submission creates a
-    new timestamped JSON file, so the complete history is retained.
-    """
-    department_dir = os.path.join(
-        STUDENT_RECORDS_DIR, _safe_folder_name(report.get("Department", "Unknown"))
-    )
-    semester_dir = os.path.join(
-        department_dir, _safe_folder_name(report.get("Semester", "Unknown"))
-    )
-    os.makedirs(semester_dir, exist_ok=True)
-
-    uid = _safe_folder_name(report.get("University_ID", "Unknown"))
-    timestamp = re.sub(r"[^0-9]", "", str(report.get("Created_Time", datetime.now().strftime("%Y%m%d%H%M%S"))))
-    filename = f"{uid}_{timestamp}_{datetime.now().strftime('%f')}.json"
-    path = os.path.join(semester_dir, filename)
-
-    payload = dict(report)
-    payload["Archive_Path"] = path.replace("\\", "/")
-    payload["Archived_At"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(payload, f, ensure_ascii=False, indent=2)
-    return path
-
-
 def upsert_report(report):
-    """Append-only storage. Existing student records are NEVER overwritten/deleted.
-
-    The function name is kept for compatibility with the rest of the app, but it
-    now appends every submission to the master CSV and creates an archive file.
-    """
-    df = load_reports()
-    new_row = pd.DataFrame([report], columns=REPORT_COLUMNS)
-    df = pd.concat([df, new_row], ignore_index=True)
-    save_reports(df)
-    archive_student_record(report)
-
-
-def delete_student_record(report):
-    """Delete one stored student submission. This function is called only from
-    the authenticated Tutor Dashboard. The matching master CSV row and its
-    archived JSON snapshot are removed together.
-    """
     df = load_reports()
     if df.empty:
-        return False, "No stored records found."
+        df = pd.DataFrame([report], columns=REPORT_COLUMNS)
+    else:
+        mask = (
+            df["University_ID"].astype(str).eq(str(report["University_ID"])) &
+            df["Department"].astype(str).eq(str(report["Department"]))
+        )
+        df = df.loc[~mask].copy()
+        df = pd.concat([df, pd.DataFrame([report])], ignore_index=True)
+    save_reports(df)
 
-    uid = str(report.get("University_ID", "")).strip()
-    department = str(report.get("Department", "")).strip()
-    semester = str(report.get("Semester", "")).strip()
-    created = str(report.get("Created_Time", "")).strip()
 
-    mask = (
-        df["University_ID"].astype(str).str.strip().eq(uid) &
-        df["Department"].astype(str).str.strip().eq(department) &
-        df["Semester"].astype(str).str.strip().str.upper().eq(semester.upper()) &
-        df["Created_Time"].astype(str).str.strip().eq(created)
-    )
-    if not mask.any():
-        return False, "The selected record could not be found."
-
+def delete_student(uid, department):
+    df = load_reports()
+    if df.empty:
+        return
+    mask = df["University_ID"].astype(str).eq(str(uid)) & df["Department"].astype(str).eq(str(department))
     save_reports(df.loc[~mask].copy())
-
-    # Remove the corresponding archived JSON snapshot(s).
-    archive_dir = os.path.join(
-        STUDENT_RECORDS_DIR,
-        _safe_folder_name(department),
-        _safe_folder_name(semester),
-    )
-    removed_files = 0
-    if os.path.isdir(archive_dir):
-        timestamp = re.sub(r"[^0-9]", "", created)
-        prefix = f"{_safe_folder_name(uid)}_{timestamp}_"
-        for filename in os.listdir(archive_dir):
-            if filename.startswith(prefix) and filename.lower().endswith(".json"):
-                try:
-                    os.remove(os.path.join(archive_dir, filename))
-                    removed_files += 1
-                except OSError:
-                    pass
-
-    return True, f"Deleted 1 student submission and {removed_files} archived file(s)."
 
 
 def get_subjects(department, semester):
@@ -524,6 +336,158 @@ def parse_subjects(raw):
         return []
 
 # ============================================================
+# REGISTRATION / PROFILE / AUDIT HELPERS
+# ============================================================
+def _load_generic_csv(path, columns):
+    if not os.path.exists(path):
+        return pd.DataFrame(columns=columns)
+    try:
+        df = pd.read_csv(path)
+        for col in columns:
+            if col not in df.columns:
+                df[col] = ""
+        return df[columns]
+    except Exception:
+        return pd.DataFrame(columns=columns)
+
+
+def load_registrations():
+    return _load_generic_csv(REGISTRATION_FILE, REGISTRATION_COLUMNS)
+
+
+def save_registrations(df):
+    df.to_csv(REGISTRATION_FILE, index=False)
+
+
+def register_student(name, uid, department, semester, tutor_username):
+    df = load_registrations()
+    uid = uid.strip()
+    mask = df["University_ID"].astype(str).str.lower().eq(uid.lower())
+    row = {
+        "University_ID": uid,
+        "Student_Name": name.strip(),
+        "Department": department,
+        "Semester": semester,
+        "Tutor_Username": tutor_username,
+        "Registered_Time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+    }
+    if mask.any():
+        df.loc[mask, list(row.keys())] = list(row.values())
+    else:
+        df = pd.concat([df, pd.DataFrame([row])], ignore_index=True)
+    save_registrations(df)
+    return row
+
+
+def find_registration(uid):
+    df = load_registrations()
+    if df.empty:
+        return None
+    x = df[df["University_ID"].astype(str).str.lower().eq(str(uid).strip().lower())]
+    return x.iloc[0].to_dict() if not x.empty else None
+
+
+def load_tutor_profiles():
+    return _load_generic_csv(TUTOR_PROFILE_FILE, TUTOR_PROFILE_COLUMNS)
+
+
+def save_tutor_profile(username, department, credit_score):
+    df = load_tutor_profiles()
+    row = {
+        "Tutor_Username": username,
+        "Department": department,
+        "Credit_Score": float(credit_score),
+        "Updated_Time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+    }
+    mask = df["Tutor_Username"].astype(str).eq(username)
+    if mask.any():
+        df.loc[mask, list(row.keys())] = list(row.values())
+    else:
+        df = pd.concat([df, pd.DataFrame([row])], ignore_index=True)
+    df.to_csv(TUTOR_PROFILE_FILE, index=False)
+
+
+def get_tutor_credit_score(username):
+    df = load_tutor_profiles()
+    if df.empty:
+        return 0.0
+    x = df[df["Tutor_Username"].astype(str).eq(str(username))]
+    if x.empty:
+        return 0.0
+    try:
+        return float(x.iloc[0]["Credit_Score"])
+    except Exception:
+        return 0.0
+
+
+def audit(action, role, username="", uid="", department="", semester="", details=""):
+    df = _load_generic_csv(AUDIT_FILE, AUDIT_COLUMNS)
+    row = {
+        "Timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "Role": role, "Username": username, "Action": action,
+        "University_ID": uid, "Department": department, "Semester": semester,
+        "Details": details,
+    }
+    df = pd.concat([df, pd.DataFrame([row])], ignore_index=True)
+    df.to_csv(AUDIT_FILE, index=False)
+
+
+def student_file_dir(uid):
+    safe = re.sub(r"[^A-Za-z0-9_-]", "_", str(uid).strip())
+    path = os.path.join(STUDENT_FILES_DIR, safe)
+    os.makedirs(path, exist_ok=True)
+    return path
+
+
+def save_student_file(uploaded_file, uid):
+    if uploaded_file is None:
+        return None
+    folder = student_file_dir(uid)
+    safe_name = re.sub(r"[^A-Za-z0-9._-]", "_", uploaded_file.name)
+    path = os.path.join(folder, safe_name)
+    with open(path, "wb") as f:
+        f.write(uploaded_file.getbuffer())
+    return path
+
+
+def get_student_files(uid):
+    folder = student_file_dir(uid)
+    return [os.path.join(folder, x) for x in sorted(os.listdir(folder)) if os.path.isfile(os.path.join(folder, x))]
+
+
+def create_student_card_png(student, output_format="PNG"):
+    if not PIL_AVAILABLE:
+        return None
+    width, height = 1000, 620
+    img = Image.new("RGB", (width, height), (15, 23, 42))
+    draw = ImageDraw.Draw(img)
+    # Simple ATM-style smart card: clean main elements only.
+    draw.rounded_rectangle((25, 25, width-25, height-25), radius=38, fill=(30, 64, 175), outline=(125, 211, 252), width=4)
+    draw.rounded_rectangle((55, 55, width-55, height-55), radius=30, fill=(15, 23, 42), outline=(99, 102, 241), width=2)
+    try:
+        bold = ImageFont.truetype("DejaVuSans-Bold.ttf", 42)
+        name_font = ImageFont.truetype("DejaVuSans-Bold.ttf", 34)
+        normal = ImageFont.truetype("DejaVuSans.ttf", 24)
+        uid_font = ImageFont.truetype("DejaVuSansMono.ttf", 28)
+    except Exception:
+        bold = name_font = normal = uid_font = ImageFont.load_default()
+    draw.text((85, 82), "EduPredict SPP", font=bold, fill="white")
+    draw.text((85, 145), "STUDENT SMART CARD", font=normal, fill=(191, 219, 254))
+    draw.text((85, 220), str(student.get("Student_Name", "Student"))[:30], font=name_font, fill="white")
+    draw.text((85, 275), str(student.get("University_ID", "")), font=uid_font, fill=(224, 242, 254))
+    draw.text((85, 340), f"{student.get('Department','')}", font=normal, fill=(203, 213, 225))
+    draw.text((85, 380), f"Semester: {student.get('Semester','')}", font=normal, fill=(203, 213, 225))
+    draw.text((85, 450), "KTU B.Tech", font=normal, fill=(165, 243, 252))
+    initials = "".join([x[:1] for x in str(student.get("Student_Name", "S")).split()][:2]).upper() or "S"
+    draw.ellipse((790, 180, 910, 300), fill=(51, 65, 85), outline=(125, 211, 252), width=3)
+    bbox = draw.textbbox((0,0), initials, font=bold)
+    draw.text((850-(bbox[2]-bbox[0])/2, 240-(bbox[3]-bbox[1])/2), initials, font=bold, fill="white")
+    buf = io.BytesIO()
+    img.save(buf, format=output_format)
+    buf.seek(0)
+    return buf.getvalue()
+
+# ============================================================
 # PERFORMANCE CALCULATION
 # ============================================================
 def attendance_mark(attendance):
@@ -549,116 +513,6 @@ def performance_circle(level):
         "Above Average": "🟡",
         "Good": "🟢",
     }.get(level, "⚪")
-
-
-def _ann_features_from_subject(item):
-    """Return the five ANN input features used by EduPredict SPP."""
-    return [
-        float(item.get("Attendance_Mark", attendance_mark(item.get("Attendance", 0)))),
-        float(item.get("Internal", 0)),
-        float(item.get("Assignment", 0)),
-        float(item.get("Previous", 0)),
-        float(item.get("Study_Hours", 0)),
-    ]
-
-
-def _ann_level_from_features(row):
-    """Project-defined target used only when real labelled records are insufficient."""
-    att, internal, assignment, previous, study = row
-    score = float(np.mean([
-        (att / 5) * 100,
-        (min(max(study, 0), 6) / 6) * 100,
-        (internal / 40) * 100,
-        (assignment / 15) * 100,
-        (previous / 60) * 100,
-    ]))
-    if score >= 80:
-        return "Good"
-    if score >= 65:
-        return "Above Average"
-    if score >= 50:
-        return "Average"
-    return "Needs Improvement"
-
-
-def train_ann_model():
-    """Train the ANN from stored labelled records, with a project-defined seed dataset for first use."""
-    if not ANN_AVAILABLE:
-        return {"available": False, "message": "scikit-learn is not installed. Run: pip install scikit-learn"}
-
-    X_real, y_real = [], []
-    df = load_reports()
-    if not df.empty:
-        for _, report in df.iterrows():
-            for item in parse_subjects(report.get("Subjects_JSON", "[]")):
-                try:
-                    features = _ann_features_from_subject(item)
-                    label = str(item.get("Level", "")).strip()
-                    if label not in {"Good", "Above Average", "Average", "Needs Improvement"}:
-                        label = _ann_level_from_features(features)
-                    X_real.append(features)
-                    y_real.append(label)
-                except (TypeError, ValueError):
-                    continue
-
-    # A first-run ANN needs enough examples and at least two classes. The seed
-    # data is generated from the same project-defined scoring rubric; once enough
-    # real labelled records exist, those records become the ANN training source.
-    use_real = len(X_real) >= 20 and len(set(y_real)) >= 2
-    if use_real:
-        X, y, source = np.asarray(X_real, dtype=float), np.asarray(y_real), "stored student records"
-    else:
-        rng = np.random.default_rng(42)
-        n = 1600
-        X = np.column_stack([
-            rng.integers(0, 6, n),
-            rng.uniform(0, 40, n),
-            rng.uniform(0, 15, n),
-            rng.uniform(0, 60, n),
-            rng.uniform(0, 6, n),
-        ])
-        y = np.asarray([_ann_level_from_features(row) for row in X])
-        source = "project-defined seed training data (used until 20+ labelled records are available)"
-
-    scaler = StandardScaler()
-    X_scaled = scaler.fit_transform(X)
-    model = MLPClassifier(
-        hidden_layer_sizes=(32, 16),
-        activation="relu",
-        solver="adam",
-        learning_rate_init=0.005,
-        max_iter=1200,
-        random_state=42,
-        early_stopping=False,
-    )
-    try:
-        model.fit(X_scaled, y)
-        training_accuracy = float(model.score(X_scaled, y) * 100)
-    except Exception as exc:
-        return {"available": False, "message": f"ANN training failed: {exc}"}
-
-    return {
-        "available": True,
-        "model": model,
-        "scaler": scaler,
-        "training_samples": int(len(X)),
-        "training_source": source,
-        "training_accuracy": training_accuracy,
-        "classes": list(model.classes_),
-    }
-
-
-def predict_with_ann(item, model_result=None):
-    """Predict the subject performance level using a small feed-forward ANN."""
-    result = model_result if model_result is not None else train_ann_model()
-    if not result.get("available"):
-        return "", 0.0, result.get("message", "ANN unavailable")
-    features = np.asarray([_ann_features_from_subject(item)], dtype=float)
-    scaled = result["scaler"].transform(features)
-    prediction = str(result["model"].predict(scaled)[0])
-    probabilities = result["model"].predict_proba(scaled)[0]
-    confidence = float(np.max(probabilities) * 100)
-    return prediction, confidence, result
 
 
 def normalize_subject(data):
@@ -738,21 +592,28 @@ def make_report(username, name, uid, semester, department, subjects):
     }
 
 
-def find_student(username, uid):
+def find_student(username="", uid=""):
+    # Student authentication is based on University ID; username is kept only
+    # for backward compatibility with older records.
+    uid = str(uid).strip()
+    reg = find_registration(uid)
+    if reg:
+        reports = load_reports()
+        if not reports.empty:
+            found = reports[reports["University_ID"].astype(str).str.lower().eq(uid.lower())]
+            if not found.empty:
+                return found.iloc[0].to_dict()
+        return {
+            "Username": "", "Student_Name": reg["Student_Name"], "University_ID": reg["University_ID"],
+            "Semester": reg["Semester"], "Department": reg["Department"], "Subjects_JSON": "",
+            "Created_Time": reg["Registered_Time"], "_registered_only": True
+        }
+    # Legacy records without registration entry.
     df = load_reports()
     if df.empty:
         return None
-    found = df[
-        df["Username"].astype(str).str.lower().eq(username.strip().lower()) &
-        df["University_ID"].astype(str).str.lower().eq(uid.strip().lower())
-    ]
-    if found.empty:
-        return None
-    # The newest submission is the active student record, while older
-    # submissions remain permanently stored for history/analysis.
-    if "Created_Time" in found.columns:
-        found = found.sort_values("Created_Time")
-    return found.iloc[-1].to_dict()
+    found = df[df["University_ID"].astype(str).str.lower().eq(uid.lower())]
+    return found.iloc[0].to_dict() if not found.empty else None
 
 # ============================================================
 # PDF
@@ -825,12 +686,6 @@ def create_pdf(report):
         ]))
         story.append(dt)
         story.append(Spacer(1, 5))
-        if x.get("ANN_Prediction"):
-            story.append(Paragraph(
-                f"<b>ANN Prediction:</b> {x.get('ANN_Prediction')} &nbsp;&nbsp; "
-                f"<b>ANN Confidence:</b> {float(x.get('ANN_Confidence', 0)):.1f}%",
-                small
-            ))
         story.append(Paragraph(f"<b>Complement:</b> {x.get('Compliment', '')}", small))
         story.append(Paragraph("<b>How to improve:</b> " + " ".join(x.get("Recommendations", [])), small))
         story.append(Spacer(1, 9))
@@ -918,195 +773,35 @@ def build_all_department_analysis():
     return records, summary, float(records["Overall"].mean())
 
 
-def all_department_kmeans_analysis():
-    """Run one K-Means analysis across subject records from every department."""
-    if not SKLEARN_AVAILABLE:
-        return {"available": False, "message": "scikit-learn is not installed. Run: pip install scikit-learn"}
-
-    df = load_reports()
-    if df.empty:
-        return {"available": False, "message": "No student records are available for K-Means analysis."}
-
-    records = []
-    for _, row in df.iterrows():
-        for item in parse_subjects(row.get("Subjects_JSON", "[]")):
-            try:
-                records.append({
-                    "Department": str(row.get("Department", "Unknown")),
-                    "Semester": str(row.get("Semester", "Unknown")),
-                    "University_ID": str(row.get("University_ID", "")),
-                    "Student_Name": str(row.get("Student_Name", "")),
-                    "Subject": str(item.get("Subject", "Unknown")),
-                    "Attendance_Mark": float(item.get("Attendance_Mark", attendance_mark(item.get("Attendance", 0)))),
-                    "Internal": float(item.get("Internal", 0)),
-                    "Assignment": float(item.get("Assignment", 0)),
-                    "Previous": float(item.get("Previous", 0)),
-                    "Study_Hours": float(item.get("Study_Hours", 0)),
-                    "Overall": float(item.get("Overall", 0)),
-                })
-            except (TypeError, ValueError):
-                continue
-
-    if not records:
-        return {"available": False, "message": "Student records were found, but no valid subject data could be read."}
-
-    raw = pd.DataFrame(records)
-    features = ["Attendance_Mark", "Internal", "Assignment", "Previous", "Study_Hours"]
-    raw[features] = raw[features].apply(pd.to_numeric, errors="coerce").fillna(0.0)
-    raw["Overall"] = pd.to_numeric(raw["Overall"], errors="coerce").fillna(0.0)
-
-    k = min(4, len(raw))
-    scaler = StandardScaler()
-    try:
-        X_scaled = scaler.fit_transform(raw[features].to_numpy(dtype=float))
-        model = KMeans(n_clusters=k, random_state=42, n_init=10)
-        raw["Cluster"] = model.fit_predict(X_scaled) + 1
-    except Exception as exc:
-        return {"available": False, "message": f"K-Means could not be calculated: {exc}"}
-
-    # Give cluster numbers a stable performance interpretation without treating
-    # the clusters as official grades.
-    means = raw.groupby("Cluster")["Overall"].mean().sort_values()
-    rank_by_cluster = {int(cluster): rank for rank, cluster in enumerate(means.index)}
-    labels = {
-        0: "Low-performance group",
-        1: "Average-performance group",
-        2: "Above-average group",
-        3: "Good-performance group",
-    }
-
-    summary = []
-    for cluster in sorted(raw["Cluster"].unique()):
-        group = raw[raw["Cluster"] == cluster]
-        summary.append({
-            "Cluster": int(cluster),
-            "Records": int(len(group)),
-            "Students": int(group["University_ID"].nunique()),
-            "Departments": int(group["Department"].nunique()),
-            "Average_Overall": float(group["Overall"].mean()),
-            "Interpretation": labels.get(rank_by_cluster[int(cluster)], "Performance group"),
-        })
-
-    original_centroids = scaler.inverse_transform(model.cluster_centers_)
-    centroids = []
-    for cluster_zero in range(k):
-        cluster_number = cluster_zero + 1
-        centroids.append({
-            "Cluster": cluster_number,
-            "Attendance_Mark": float(original_centroids[cluster_zero, 0]),
-            "Internal": float(original_centroids[cluster_zero, 1]),
-            "Assignment": float(original_centroids[cluster_zero, 2]),
-            "Previous": float(original_centroids[cluster_zero, 3]),
-            "Study_Hours": float(original_centroids[cluster_zero, 4]),
-            "Interpretation": labels.get(rank_by_cluster.get(cluster_number, 0), "Performance group"),
-        })
-
-    department_cluster = (
-        raw.groupby(["Department", "Cluster"], as_index=False)
-        .agg(Records=("University_ID", "size"), Students=("University_ID", "nunique"),
-             Average_Overall=("Overall", "mean"))
-        .sort_values(["Department", "Cluster"])
-    )
-
-    return {
-        "available": True,
-        "n_samples": len(raw),
-        "n_students": int(raw["University_ID"].nunique()),
-        "n_departments": int(raw["Department"].nunique()),
-        "k": k,
-        "summary": summary,
-        "centroids": centroids,
-        "department_cluster": department_cluster,
-        "records": raw,
-        "features": features,
-        "inertia": float(model.inertia_),
-    }
-
-
-def create_all_department_kmeans_pdf(result):
-    """Create one PDF containing the complete all-department K-Means analysis."""
+def create_all_department_pdf(records, summary, overall_average):
     buffer = io.BytesIO()
-    doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=24, leftMargin=24, topMargin=24, bottomMargin=24)
+    doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=28, leftMargin=28, topMargin=28, bottomMargin=28)
     styles = getSampleStyleSheet()
-    title = ParagraphStyle("all_k_title", parent=styles["Title"], alignment=TA_CENTER, fontSize=17, spaceAfter=10)
-    small = ParagraphStyle("all_k_small", parent=styles["Normal"], fontSize=7.5, leading=9)
-    story = [Paragraph("EduPredict SPP — All Department K-Means Clustering Analysis", title)]
-
-    if not result.get("available"):
-        story.append(Paragraph(result.get("message", "K-Means analysis unavailable."), styles["Normal"]))
-        doc.build(story)
-        buffer.seek(0)
-        return buffer.getvalue()
-
-    story.append(Paragraph(
-        f"<b>Students:</b> {result['n_students']} &nbsp;&nbsp; "
-        f"<b>Departments:</b> {result['n_departments']} &nbsp;&nbsp; "
-        f"<b>Subject records:</b> {result['n_samples']} &nbsp;&nbsp; "
-        f"<b>K:</b> {result['k']} &nbsp;&nbsp; <b>Inertia:</b> {result['inertia']:.4f}", small))
-    story.append(Paragraph("Features: Attendance Mark, Internal, Assignment, Previous Mark and Study Hours.", small))
-    story.append(Spacer(1, 8))
-
-    story.append(Paragraph("1. Overall Cluster Summary", styles["Heading2"]))
-    data = [["Cluster", "Records", "Students", "Departments", "Avg Overall", "Interpretation"]]
-    for r in result["summary"]:
-        data.append([str(r["Cluster"]), str(r["Records"]), str(r["Students"]), str(r["Departments"]), f"{r['Average_Overall']:.2f}%", r["Interpretation"]])
-    t = Table(data, repeatRows=1, colWidths=[45,48,48,58,65,170])
-    t.setStyle(TableStyle([
-        ("BACKGROUND", (0,0), (-1,0), colors.HexColor("#172554")),
-        ("TEXTCOLOR", (0,0), (-1,0), colors.white),
-        ("GRID", (0,0), (-1,-1), 0.35, colors.grey),
-        ("FONTSIZE", (0,0), (-1,-1), 6.8),
-        ("VALIGN", (0,0), (-1,-1), "MIDDLE"),
-    ]))
-    story.append(t)
-    story.append(Spacer(1, 10))
-
-    story.append(Paragraph("2. Department-wise Cluster Table", styles["Heading2"]))
-    data = [["Department", "Cluster", "Records", "Students", "Avg Overall"]]
-    for _, r in result["department_cluster"].iterrows():
-        data.append([str(r["Department"]), str(int(r["Cluster"])), str(int(r["Records"])), str(int(r["Students"])), f"{r['Average_Overall']:.2f}%"])
-    t = Table(data, repeatRows=1, colWidths=[245,55,55,55,65])
-    t.setStyle(TableStyle([
-        ("BACKGROUND", (0,0), (-1,0), colors.HexColor("#334155")),
-        ("TEXTCOLOR", (0,0), (-1,0), colors.white),
-        ("GRID", (0,0), (-1,-1), 0.35, colors.grey),
-        ("FONTSIZE", (0,0), (-1,-1), 6.7),
-    ]))
-    story.append(t)
-    story.append(Spacer(1, 10))
-
-    story.append(Paragraph("3. K-Means Centroids", styles["Heading2"]))
-    data = [["Cluster", "Attendance", "Internal", "Assignment", "Previous", "Study Hrs", "Interpretation"]]
-    for r in result["centroids"]:
-        data.append([str(r["Cluster"]), f"{r['Attendance_Mark']:.2f}", f"{r['Internal']:.2f}", f"{r['Assignment']:.2f}", f"{r['Previous']:.2f}", f"{r['Study_Hours']:.2f}", r["Interpretation"]])
-    t = Table(data, repeatRows=1, colWidths=[42,58,50,58,50,52,155])
-    t.setStyle(TableStyle([
-        ("BACKGROUND", (0,0), (-1,0), colors.HexColor("#475569")),
-        ("TEXTCOLOR", (0,0), (-1,0), colors.white),
-        ("GRID", (0,0), (-1,-1), 0.35, colors.grey),
-        ("FONTSIZE", (0,0), (-1,-1), 6.3),
-    ]))
-    story.append(t)
-    story.append(Spacer(1, 10))
-
-    story.append(Paragraph("4. Student/Subject Cluster Assignment", styles["Heading2"]))
-    data = [["Department", "Sem", "University ID", "Student", "Subject", "Overall", "Cluster"]]
-    for _, r in result["records"].sort_values(["Department", "Semester", "Student_Name", "Subject"]).iterrows():
-        data.append([str(r["Department"]), str(r["Semester"]), str(r["University_ID"]), str(r["Student_Name"]), str(r["Subject"]), f"{r['Overall']:.2f}%", str(int(r["Cluster"]))])
-    t = Table(data, repeatRows=1, colWidths=[105,30,65,85,105,45,42])
-    t.setStyle(TableStyle([
-        ("BACKGROUND", (0,0), (-1,0), colors.HexColor("#0f172a")),
-        ("TEXTCOLOR", (0,0), (-1,0), colors.white),
-        ("GRID", (0,0), (-1,-1), 0.25, colors.grey),
-        ("FONTSIZE", (0,0), (-1,-1), 5.7),
-        ("VALIGN", (0,0), (-1,-1), "MIDDLE"),
-    ]))
-    story.append(t)
-    story.append(Spacer(1, 8))
-    story.append(Paragraph(
-        "K-Means is used here as an analytical clustering method. Cluster labels are project-defined interpretations and do not represent official university grades.",
-        styles["Italic"]
-    ))
+    title = ParagraphStyle("all_title", parent=styles["Title"], alignment=TA_CENTER, fontSize=18, spaceAfter=12)
+    story = [Paragraph("EduPredict SPP — All Department Analysis", title)]
+    if records.empty:
+        story.append(Paragraph("No student records are available for analysis.", styles["Normal"]))
+    else:
+        story.append(Paragraph(f"<b>Total student records:</b> {len(records)}", styles["Normal"]))
+        story.append(Paragraph(f"<b>Overall average performance:</b> {overall_average:.2f}%", styles["Normal"]))
+        story.append(Spacer(1, 10))
+        story.append(Paragraph("Department Summary", styles["Heading2"]))
+        data = [["Department", "Students", "Avg Score", "Avg Attendance", "Avg Internal"]]
+        for _, r in summary.iterrows():
+            data.append([str(r["Department"]), str(int(r["Students"])), f"{r['Average_Overall']:.2f}%", f"{r['Average_Attendance']:.2f}%", f"{r['Average_Internal']:.2f}/40"])
+        t = Table(data, repeatRows=1, colWidths=[210,55,65,75,65])
+        t.setStyle(TableStyle([("BACKGROUND",(0,0),(-1,0),colors.HexColor("#172554")),("TEXTCOLOR",(0,0),(-1,0),colors.white),("GRID",(0,0),(-1,-1),0.4,colors.grey),("FONTSIZE",(0,0),(-1,-1),7),("VALIGN",(0,0),(-1,-1),"MIDDLE")]))
+        story.append(t)
+        story.append(Spacer(1, 12))
+        story.append(Paragraph("Student-level Overview", styles["Heading2"]))
+        student_data = [["Department", "Semester", "University ID", "Student", "Score"]]
+        for _, r in records.sort_values(["Department", "Semester", "Student_Name"]).iterrows():
+            student_data.append([str(r["Department"]), str(r["Semester"]), str(r["University_ID"]), str(r["Student_Name"]), f"{r['Overall']:.2f}%"])
+        st = Table(student_data, repeatRows=1, colWidths=[145,45,70,150,45])
+        st.setStyle(TableStyle([("BACKGROUND",(0,0),(-1,0),colors.HexColor("#334155")),("TEXTCOLOR",(0,0),(-1,0),colors.white),("GRID",(0,0),(-1,-1),0.3,colors.grey),("FONTSIZE",(0,0),(-1,-1),6.5)]))
+        story.append(st)
+        story.append(Spacer(1, 12))
+        story.append(Paragraph("This report is an academic dashboard analysis based on records entered into EduPredict SPP. Performance indicators are project-defined and are not official university grades.", styles["Italic"]))
     doc.build(story)
     buffer.seek(0)
     return buffer.getvalue()
@@ -1114,8 +809,8 @@ def create_all_department_kmeans_pdf(result):
 
 def all_department_dashboard():
     app_brand()
-    st.title("🌐 All Department K-Means Analysis Dashboard")
-    st.caption("One combined K-Means clustering analysis using subject records from every department and semester.")
+    st.title("🌐 All Department Analysis Dashboard")
+    st.caption("Combined academic overview of all departments and semesters stored in the application.")
 
     c1, c2 = st.columns([1, 1])
     if c1.button("⬅️ Back to Tutor Dashboard", use_container_width=True):
@@ -1125,52 +820,39 @@ def all_department_dashboard():
     if c2.button("🚪 Logout", use_container_width=True):
         logout()
 
-    result = all_department_kmeans_analysis()
-    if not result.get("available"):
-        st.info(result.get("message", "No data available for analysis."))
+    records, summary, overall_average = build_all_department_analysis()
+    if records.empty:
+        st.info("No student records are available yet. Add student records from the Tutor Dashboard first.")
         return
 
-    a, b, c, d = st.columns(4)
-    a.metric("Students", result["n_students"])
-    b.metric("Departments", result["n_departments"])
-    c.metric("Subject Records", result["n_samples"])
-    d.metric("Clusters (K)", result["k"])
+    a, b, c = st.columns(3)
+    a.metric("Total Students", int(records["University_ID"].nunique()))
+    b.metric("Departments", int(records["Department"].nunique()))
+    c.metric("Overall Average", f"{overall_average:.2f}%")
 
-    st.subheader("📊 All Department K-Means Cluster Summary")
-    summary_df = pd.DataFrame(result["summary"]).rename(columns={
-        "Cluster": "Cluster", "Records": "Records", "Students": "Students",
-        "Departments": "Departments", "Average_Overall": "Average Overall", "Interpretation": "Interpretation"
-    })
-    summary_df["Average Overall"] = summary_df["Average Overall"].map(lambda x: f"{x:.2f}%")
-    st.dataframe(summary_df, use_container_width=True, hide_index=True)
+    st.subheader("📊 Department-wise Analysis")
+    display_summary = summary.copy()
+    display_summary["Average_Overall"] = display_summary["Average_Overall"].map(lambda x: f"{x:.2f}%")
+    display_summary["Average_Attendance"] = display_summary["Average_Attendance"].map(lambda x: f"{x:.2f}%")
+    display_summary["Average_Internal"] = display_summary["Average_Internal"].map(lambda x: f"{x:.2f}/40")
+    st.dataframe(display_summary, use_container_width=True, hide_index=True)
 
-    st.subheader("🏫 Department-wise K-Means Clustering Table")
-    dept_df = result["department_cluster"].copy()
-    dept_df["Average_Overall"] = dept_df["Average_Overall"].map(lambda x: f"{x:.2f}%")
-    st.dataframe(dept_df, use_container_width=True, hide_index=True)
+    st.subheader("👥 All Student Analysis")
+    display_records = records.copy()
+    display_records["Overall"] = display_records["Overall"].map(lambda x: f"{x:.2f}%")
+    display_records["Attendance"] = display_records["Attendance"].map(lambda x: f"{x:.2f}%")
+    display_records["Internal"] = display_records["Internal"].map(lambda x: f"{x:.2f}/40")
+    st.dataframe(display_records, use_container_width=True, hide_index=True)
 
-    st.subheader("🎯 K-Means Centroids")
-    st.dataframe(pd.DataFrame(result["centroids"]), use_container_width=True, hide_index=True)
-
-    st.subheader("👥 Student / Subject Cluster Assignment")
-    assignment_df = result["records"].copy()
-    st.dataframe(
-        assignment_df[["Department", "Semester", "University_ID", "Student_Name", "Subject", "Overall", "Cluster"]],
-        use_container_width=True,
-        hide_index=True,
-    )
-    st.caption(f"K-Means inertia: {result['inertia']:.4f}. Clustering uses standardized attendance, internal, assignment, previous-mark and study-hour features.")
-
-    pdf = create_all_department_kmeans_pdf(result)
+    pdf = create_all_department_pdf(records, summary, overall_average)
     st.download_button(
-        "📥 Download Complete All-Department K-Means PDF",
+        "📥 Download All Department Analysis PDF",
         pdf,
-        "All_Department_KMeans_Clustering_Analysis.pdf",
+        "All_Department_Analysis.pdf",
         "application/pdf",
         use_container_width=True,
         type="primary",
     )
-
 
 # ============================================================
 # CSV TEMPLATE / IMPORT
@@ -1219,104 +901,119 @@ def logout():
     st.rerun()
 
 
+def minute_visual():
+    return ["🎓", "📚", "📊"][datetime.now().minute % 3]
+
+
 def home_page():
+    if AUTOREFRESH_AVAILABLE:
+        st_autorefresh(interval=60_000, key="home_page_minute_refresh")
     app_brand()
-    if not st.session_state.get("intro_seen", False):
-        st.markdown("""
-        <div class="intro3d">
-          <div class="intro-glow"></div>
-          <div class="intro-logo3d">🎓</div>
-          <div class="intro-title">EduPredict SPP</div>
-          <div class="intro-subtitle">3D Student Performance Prediction • KTU B.Tech</div>
-          <div class="intro-cube"><span>ANN</span><span>K-MEANS</span><span>KTU</span></div>
-          <div class="intro-loading">INITIALIZING PERFORMANCE ENGINE • • •</div>
-        </div>
-        """, unsafe_allow_html=True)
-        if st.button("▶ Enter EduPredict SPP", use_container_width=True, type="primary"):
-            st.session_state.intro_seen = True
-            st.rerun()
-        st.caption("The 3D introduction will fade automatically; click Enter to continue immediately.")
-    st.markdown("""
+    visual = minute_visual()
+    st.markdown(f"""
     <div class="hero">
-      <div class="grid3d"></div><div class="orb o1"></div><div class="orb o2"></div>
+      <div class="login-grid"></div><div class="login-orb one"></div><div class="login-orb two"></div>
       <div style="position:relative;z-index:2">
-        <div style="font-size:3rem">🎓</div>
+        <div class="login-main-emoji">{visual}</div>
+        <div class="minute-badge">Live visual • changes every minute</div>
         <h1>Student Performance Prediction</h1>
-        <p>Department-aware and semester-aware student performance tracking for tutors and students.</p>
+        <p>KTU B.Tech student registration, marks, performance analysis and smart student card.</p>
       </div>
     </div>
     """, unsafe_allow_html=True)
     st.write("")
-    a, b = st.columns(2)
-    if a.button("👨‍🏫 Tutor Login", use_container_width=True, type="primary"):
-        st.session_state.page = "teacher_login"; st.rerun()
-    if b.button("🎓 Student Login", use_container_width=True):
-        st.session_state.page = "student_login"; st.rerun()
+    a,b,c=st.columns(3)
+    if a.button("👨‍🏫 Tutor Login",use_container_width=True,type="primary"):
+        st.session_state.page="teacher_login"; st.rerun()
+    if b.button("🎓 Student Login",use_container_width=True):
+        st.session_state.page="student_login"; st.rerun()
+    if c.button("🪪 Student Smart Card",use_container_width=True):
+        st.session_state.page="smart_card"; st.rerun()
 
 
 def login_shell(title, subtitle):
     app_brand()
+    visual = minute_visual()
     st.markdown(f"""
-    <div class="login-wrap"><div class="grid3d"></div><div class="orb o1"></div><div class="orb o2"></div>
+    <div class="login-wrap">
+      <div class="login-grid"></div><div class="login-orb one"></div><div class="login-orb two"></div>
       <div style="width:min(560px,90%);position:relative;z-index:2;text-align:center">
-        <div style="font-size:3rem">🎓</div><h1>{title}</h1><p style="color:#94a3b8">{subtitle}</p>
+        <div class="login-main-emoji">{visual}</div>
+        <div class="minute-badge">Visual changes every minute</div>
+        <h1>{title}</h1><p style="color:#94a3b8">{subtitle}</p>
       </div>
     </div>
     """, unsafe_allow_html=True)
 
 
 def teacher_login():
-    login_shell("Tutor Login", "Select the department through the tutor account")
+    if AUTOREFRESH_AVAILABLE:
+        st_autorefresh(interval=60_000, key="teacher_login_minute_refresh")
+    login_shell("Tutor Login", "Use the tutor account assigned to your department")
     with st.form("teacher_login_form"):
-        username = st.text_input("Tutor Username")
-        password = st.text_input("Password", type="password")
-        c1, c2 = st.columns(2)
-        login = c1.form_submit_button("🔐 Login", use_container_width=True, type="primary")
-        back = c2.form_submit_button("← Back", use_container_width=True)
+        username=st.text_input("Tutor Username")
+        password=st.text_input("Password",type="password")
+        c1,c2=st.columns(2)
+        login=c1.form_submit_button("🔐 Login",use_container_width=True,type="primary")
+        back=c2.form_submit_button("← Back",use_container_width=True)
     if back:
-        st.session_state.page = "home"; st.rerun()
+        st.session_state.page="home"; st.rerun()
     if login:
-        account = TEACHERS.get(username.strip())
-        if account and account["password"] == password:
-            st.session_state.logged_in = True
-            st.session_state.role = "teacher"
-            st.session_state.username = username.strip()
-            st.session_state.teacher_department = account["department"]
-            st.session_state.active_department = account["department"]
-            st.session_state.teacher_menu_view = "menu"
-            log_action("Tutor", username.strip(), "Tutor Login", "", account["department"], "", "Successful tutor login")
-            st.session_state.page = "teacher_portal"
+        account=TEACHERS.get(username.strip())
+        if account and account["password"]==password:
+            st.session_state.logged_in=True; st.session_state.role="teacher"; st.session_state.username=username.strip()
+            st.session_state.teacher_department=account["department"]; st.session_state.page="teacher_dashboard"
+            audit("Tutor Login","Tutor",username.strip(),"",account["department"],"","Successful login")
             st.rerun()
-        else:
-            st.error("Invalid tutor username or password.")
+        else: st.error("Invalid tutor username or password.")
 
 
 def student_login():
-    login_shell("Student Login", "Use the Username and University ID registered by your tutor")
-    st.info("💡 Example: Username **Aromal kv**  •  University ID **SNM25CE001**  •  🔓 No password required")
+    if AUTOREFRESH_AVAILABLE:
+        st_autorefresh(interval=60_000, key="student_login_minute_refresh")
+    login_shell("Student Login", "Enter your registered University ID")
     with st.form("student_login_form"):
-        username = st.text_input("👤 Username", placeholder="e.g. Aromal kv")
-        uid = st.text_input("🪪 University ID", placeholder="e.g. SNM25CE001")
-        c1, c2 = st.columns(2)
-        login = c1.form_submit_button("🎓 Enter Student Portal", use_container_width=True, type="primary")
-        back = c2.form_submit_button("← Back", use_container_width=True)
+        uid=st.text_input("University ID",placeholder="e.g. SNM25CE001")
+        c1,c2=st.columns(2)
+        login=c1.form_submit_button("🎓 Open Dashboard",use_container_width=True,type="primary")
+        back=c2.form_submit_button("← Back",use_container_width=True)
     if back:
-        st.session_state.page = "home"; st.rerun()
+        st.session_state.page="home"; st.rerun()
     if login:
-        registered = find_registered_credentials(username, uid)
-        if not registered:
-            st.error("❌ No tutor-registered profile found. Check your Username and University ID, or contact your tutor.")
+        student=find_student("",uid)
+        if student:
+            st.session_state.logged_in=True; st.session_state.role="student"; st.session_state.username=""
+            st.session_state.student_report=student
+            audit("Student Login","Student","",uid,student.get("Department",""),student.get("Semester",""),"Successful login")
+            st.session_state.page="student_dashboard"; st.rerun()
+        else: st.error("No registered student found for this University ID.")
+
+
+def smart_card_page():
+    app_brand()
+    st.title("🪪 Student Smart Card")
+    st.caption("Generate a small ATM-style student card from the tutor-registered profile.")
+    uid=st.text_input("University ID",placeholder="e.g. SNM25CE001")
+    if st.button("🔎 Find Student",type="primary"):
+        student=find_student("",uid)
+        if not student:
+            st.error("No registered student found.")
             return
-        latest_report = find_student(registered["Username"], registered["University_ID"])
-        st.session_state.logged_in = True
-        st.session_state.role = "student"
-        st.session_state.username = str(registered["Username"]).strip()
-        st.session_state.student_profile = registered
-        st.session_state.student_report = latest_report
-        st.session_state.student_result_calculated = False
-        log_action("Student", st.session_state.username, "Student Login", registered["University_ID"], registered.get("Department", ""), registered.get("Semester", ""), "Student portal login")
-        st.session_state.page = "student_dashboard"
-        st.rerun()
+        st.session_state.smart_card_student=student
+    student=st.session_state.get("smart_card_student")
+    if student:
+        st.markdown(f"""
+        <div class="smart-card">
+          <div class="small">EduPredict SPP • KTU B.Tech</div>
+          <div class="name">{student.get('Student_Name','Student')}</div>
+          <div class="uid">{student.get('University_ID','')}</div>
+          <div style="margin-top:18px;color:#cbd5e1">{student.get('Department','')}<br>Semester: {student.get('Semester','')}</div>
+        </div>
+        """,unsafe_allow_html=True)
+        card=create_student_card_png(student)
+        if card:
+            st.download_button("📥 Download PNG Student Card",card,f"{student.get('University_ID','student')}_smart_card.png","image/png",type="primary",use_container_width=True)
+        st.button("← Back to Home",on_click=lambda: st.session_state.update(page="home"))
 
 # ============================================================
 # K-MEANS TUTOR ANALYSIS
@@ -1417,467 +1114,248 @@ def kmeans_analysis(department):
 # ============================================================
 # TUTOR WORKFLOW
 # ============================================================
-def tutor_portal():
-    app_brand()
-    assigned_department = st.session_state.get("teacher_department")
-    st.title("👨‍🏫 Tutor Control Center")
-    st.caption(f"Logged in as: **{st.session_state.get('username', '')}**  •  🏫 Department: **{assigned_department}**")
-    st.info("🔐 Tutor permissions are department-aware. You can register students in your assigned department and enter marks only for registered students in that department + semester.")
-    st.markdown("""
-    <div class="glass" style="margin:18px 0;padding:18px">
-      <div style="font-size:1.35rem;font-weight:800">🚀 Smart Tutor Workflow</div>
-      <div style="color:#cbd5e1;margin-top:8px">🪪 Register → 🏫 Department → 📚 Semester → 📝 Marks → 🧠 ANN → 📊 Result</div>
-      <div style="color:#94a3b8;margin-top:6px">🔒 Department + semester permission • 💾 Persistent records • ⚡ Live student portal update</div>
-    </div>
-    """, unsafe_allow_html=True)
+def tutor_registration_form(department, semester):
+    st.subheader("📝 Student Registration")
+    st.caption("Register the student first. Username is not required.")
+    with st.form("student_registration_form"):
+        name = st.text_input("Student Name")
+        uid = st.text_input("University ID")
+        submit = st.form_submit_button("💾 Register Student", type="primary", use_container_width=True)
+    if submit:
+        if not name.strip() or not uid.strip():
+            st.error("Enter Student Name and University ID.")
+            return
+        row = register_student(name, uid, department, semester, st.session_state.username)
+        audit("Student Registration", "Tutor", st.session_state.username, uid, department, semester, "Student profile registered")
+        st.success(f"✅ {name} registered successfully.")
+        st.session_state.student_registration = row
 
-    c1, c2 = st.columns(2)
-    with c1:
-        st.markdown("### 🧑‍🎓 Student Registration")
-        st.write("Create the student's official portal profile with department + semester.")
-        if st.button("🪪 Open Student Registration", use_container_width=True, type="primary"):
-            st.session_state.teacher_menu_view = "registration"; st.rerun()
-    with c2:
-        st.markdown("### 📝 Student Mark Entry")
-        st.write("Enter marks only for students already registered in your department + selected semester.")
-        if st.button("📊 Open Student Mark Entry", use_container_width=True, type="primary"):
-            st.session_state.teacher_menu_view = "marks"; st.session_state.page = "teacher_dashboard"; st.rerun()
 
-    st.divider()
-    if st.session_state.get("teacher_menu_view") == "registration":
-        st.subheader("🧑‍🎓 Register Student Profile")
-        st.success(f"🏫 Tutor department locked to: **{assigned_department}**")
-        st.caption("✨ Every registration creates a portal identity. Students later sign in with Username + University ID only.")
-        with st.form("student_registration_form"):
-            username = st.text_input("👤 Student Username", placeholder="e.g. Aromal kv")
-            uid = st.text_input("🪪 University ID", placeholder="e.g. SNM25CE001")
-            name = st.text_input("📛 Student Name", placeholder="e.g. Aromal K V")
-            semester = st.selectbox("📚 Student Semester", SEMESTERS)
-            st.caption("🔒 Department is controlled by your tutor account.")
-            submitted = st.form_submit_button("🚀 Submit Registration", use_container_width=True, type="primary")
-        if submitted:
-            ok, msg = register_student(username, uid, name, assigned_department, semester, st.session_state.get("username", ""))
-            (st.success if ok else st.error)(msg)
-        reg = load_registrations()
-        mine = reg[reg["Department"].astype(str).eq(str(assigned_department))] if not reg.empty else reg
-        st.subheader(f"📋 Registered Students — {assigned_department} ({len(mine)})")
-        if mine.empty: st.info("No students registered in your department yet.")
-        else: st.dataframe(mine, use_container_width=True, hide_index=True)
-
-    if st.button("🚪 Logout", use_container_width=True):
-        log_action("Tutor", st.session_state.get("username", ""), "Tutor Logout")
-        logout()
-
-def manual_add_form(department, semester):
-    st.subheader("➕ Add One Student")
-    st.caption("Subjects are controlled by the Department + Semester selected at the top of the Tutor Dashboard.")
-
+def tutor_mark_entry(department, semester):
+    st.subheader("📝 Student Mark Entry")
+    regs = load_registrations()
+    regs = regs[(regs["Department"].astype(str) == str(department)) & (regs["Semester"].astype(str).str.upper() == str(semester).upper())].copy()
+    if regs.empty:
+        st.info("No registered students are available for this Tutor + Department + Semester. Register a student first.")
+        return
+    labels = {f"{r['University_ID']} — {r['Student_Name']}": r for _, r in regs.iterrows()}
+    selected_label = st.selectbox("Select registered student", list(labels.keys()), key="mark_entry_student")
+    selected = labels[selected_label]
     subjects = get_subjects(department, semester)
-    if not subjects:
-        st.error(
-            f"No subject mapping is configured for {department} — {semester}. "
-            "Add the official KTU subjects to SUBJECTS_BY_DEPARTMENT in this file."
-        )
-        return
-
-    st.success(f"📚 {len(subjects)} subjects loaded: {department} — {semester}")
-    st.dataframe(
-        pd.DataFrame({"No.": range(1, len(subjects) + 1), "Subject": subjects}),
-        use_container_width=True,
-        hide_index=True,
-    )
-
-    registered = load_registrations()
-    if not registered.empty:
-        registered = registered[
-            registered["Department"].astype(str).str.strip().eq(str(department).strip()) &
-            registered["Semester"].astype(str).str.strip().str.upper().eq(str(semester).strip().upper())
-        ].reset_index(drop=True)
-    if registered.empty:
-        st.warning(f"🔒 No registered students found for **{department} — {semester}**. Only department + semester matched registrations can receive marks.")
-        return
-
-    registered_display = registered.apply(
-        lambda r: f"{r['University_ID']} — {r['Student_Name']} ({r['Username']})", axis=1
-    ).tolist()
-
-    with st.form(f"add_student_{re.sub(r'[^a-zA-Z0-9]', '_', department)}_{semester}"):
-        selected_student = st.selectbox("Registered Student (University ID — Name)", registered_display)
-        selected_idx = registered_display.index(selected_student)
-        reg_row = registered.iloc[selected_idx]
-        uid = str(reg_row["University_ID"]).strip()
-        username = str(reg_row["Username"]).strip()
-        name = str(reg_row["Student_Name"]).strip()
-        st.success(f"✅ Registered: **{name}**  •  University ID: **{uid}**")
-
-        st.markdown("### Enter marks for the selected subjects")
+    existing = load_reports()
+    old = existing[existing["University_ID"].astype(str).eq(str(selected["University_ID"]))] if not existing.empty else pd.DataFrame()
+    old_subs = parse_subjects(old.iloc[0]["Subjects_JSON"]) if not old.empty else []
+    old_map = {x.get("Subject"): x for x in old_subs}
+    with st.form("mark_entry_form"):
         values = []
         for i, subject in enumerate(subjects):
-            st.markdown(f"**{i + 1}. {subject}**")
-            a, b, c, d = st.columns(4)
-            prefix = f"{re.sub(r'[^a-zA-Z0-9]', '_', department)}_{semester}_{i}"
-            att = a.number_input("Attendance %", 0.0, 100.0, 75.0, 1.0, key=f"att_{prefix}")
-            internal = b.number_input("Internal /40", 0.0, 40.0, 20.0, 1.0, key=f"int_{prefix}")
-            assignment = c.number_input("Assignment /15", 0.0, 15.0, 8.0, 1.0, key=f"asg_{prefix}")
-            previous = d.number_input("Previous /60", 0.0, 60.0, 30.0, 1.0, key=f"prev_{prefix}")
-            values.append(normalize_subject({
-                "Subject": subject,
-                "Attendance": att,
-                "Study_Hours": 0,
-                "Internal": internal,
-                "Assignment": assignment,
-                "Previous": previous,
-            }))
-
-        submitted = st.form_submit_button(
-            "💾 Submit Student",
-            use_container_width=True,
-            type="primary"
-        )
-
+            oldx = old_map.get(subject, {})
+            st.markdown(f"**{i+1}. {subject}**")
+            a,b,c,d = st.columns(4)
+            att = a.number_input("Attendance %", 0.0, 100.0, float(oldx.get("Attendance",75)), 1.0, key=f"m_att_{i}_{selected['University_ID']}")
+            internal = b.number_input("Internal /40", 0.0, 40.0, float(oldx.get("Internal",20)), 1.0, key=f"m_int_{i}_{selected['University_ID']}")
+            assignment = c.number_input("Assignment /15", 0.0, 15.0, float(oldx.get("Assignment",8)), 1.0, key=f"m_asg_{i}_{selected['University_ID']}")
+            previous = d.number_input("Previous /60", 0.0, 60.0, float(oldx.get("Previous",30)), 1.0, key=f"m_prev_{i}_{selected['University_ID']}")
+            values.append(normalize_subject({"Subject":subject,"Attendance":att,"Study_Hours":float(oldx.get("Study_Hours",0)),"Internal":internal,"Assignment":assignment,"Previous":previous}))
+        submitted = st.form_submit_button("💾 Submit Marks", type="primary", use_container_width=True)
     if submitted:
-        reg_check = find_registered_student(uid)
-        if not reg_check:
-            st.error("This student is not registered. Register the student first.")
-            return
-        if str(reg_check.get("Department", "")).strip() != str(department).strip() or str(reg_check.get("Semester", "")).strip().upper() != str(semester).strip().upper():
-            st.error("🔒 Permission denied: this student registration does not match the selected Department + Semester.")
-            return
-        if str(st.session_state.get("teacher_department", "")).strip() != str(department).strip():
-            st.error("🔒 Permission denied: tutor can enter marks only for the tutor-assigned department.")
-            return
         if len(subjects) != 6:
-            st.error("This project requires exactly 6 subjects for the selected Semester + Department.")
+            st.error("Exactly 6 subjects are required.")
             return
-        report = make_report(username, name, uid, semester, department, values)
+        report = make_report("", selected["Student_Name"], selected["University_ID"], semester, department, values)
         upsert_report(report)
-        log_action("Tutor", st.session_state.get("username", ""), "Student Mark Submission", uid, department, semester, f"Submitted marks for {name}")
-        st.success(f"✅ {name} saved under {department} — {semester}.")
-        st.session_state["last_added_uid"] = uid.strip()
-        st.session_state["last_added_department"] = department
+        audit("Student Mark Submission", "Tutor", st.session_state.username, selected["University_ID"], department, semester, "Marks submitted")
+        st.success(f"✅ Marks saved for {selected['Student_Name']}.")
         st.rerun()
+
+
+def tutor_student_files(department, semester):
+    st.subheader("📎 Student Profile File / Photo")
+    regs = load_registrations()
+    regs = regs[(regs["Department"].astype(str) == str(department)) & (regs["Semester"].astype(str).str.upper() == str(semester).upper())].copy()
+    if regs.empty:
+        st.info("Register students first.")
+        return
+    labels = {f"{r['University_ID']} — {r['Student_Name']}": r for _, r in regs.iterrows()}
+    label = st.selectbox("Select student", list(labels.keys()), key="file_student")
+    student = labels[label]
+    uploaded = st.file_uploader("Upload student photo or profile file", type=["png","jpg","jpeg","webp","pdf","doc","docx"], key=f"profile_upload_{student['University_ID']}")
+    if uploaded is not None and st.button("📤 Save File", type="primary"):
+        path = save_student_file(uploaded, student["University_ID"])
+        audit("Student File Upload", "Tutor", st.session_state.username, student["University_ID"], department, semester, uploaded.name)
+        st.success(f"✅ Saved: {uploaded.name}")
+    files = get_student_files(student["University_ID"])
+    if files:
+        st.markdown("**Files visible to the student:**")
+        for path in files:
+            with open(path, "rb") as f:
+                data = f.read()
+            name = os.path.basename(path)
+            st.download_button(f"📎 {name}", data, name, key=f"download_tutor_{student['University_ID']}_{name}")
+    else:
+        st.info("No file uploaded yet.")
+
+
+def tutor_profile_tab():
+    st.subheader("👨‍🏫 Tutor Profile")
+    current = get_tutor_credit_score(st.session_state.username)
+    with st.form("tutor_profile_form"):
+        score = st.number_input("Tutor Credit Score /10", 0.0, 10.0, float(current), 0.1)
+        save = st.form_submit_button("💾 Save Credit Score", type="primary")
+    if save:
+        save_tutor_profile(st.session_state.username, st.session_state.teacher_department, score)
+        audit("Tutor Credit Score Updated", "Tutor", st.session_state.username, "", st.session_state.teacher_department, "", f"Score={score}/10")
+        st.success("✅ Tutor credit score saved.")
 
 def teacher_dashboard():
     app_brand()
-    assigned_department = st.session_state.get("teacher_department")
-    if assigned_department not in DEPARTMENTS:
-        assigned_department = DEPARTMENTS[0]
-
-    st.title("📝 Student Mark Entry")
-    st.info(f"Tutor account department: **{assigned_department}**  •  Only registered students can receive marks.")
-    cback, clog = st.columns(2)
-    if cback.button("← Back to Tutor Control Center", use_container_width=True):
-        st.session_state.page = "teacher_portal"
-        st.session_state.teacher_menu_view = "menu"
-        st.rerun()
-    if clog.button("🚪 Logout", use_container_width=True):
-        logout()
-
-    # IMPORTANT: these selectors are outside every form/tab. Streamlit reruns
-    # immediately when either value changes, so the subject list always follows
-    # the selected B.Tech department + semester.
-    c1, c2, c3 = st.columns([2.2, 1.0, 0.7])
-    department = c1.selectbox(
-        "🎓 B.Tech Department — Tutor Permission",
-        [assigned_department],
-        index=0,
-        key="dashboard_department",
-    )
-    semester = c2.selectbox(
-        "📚 Semester",
-        SEMESTERS,
-        index=2,
-        key="dashboard_semester",
-    )
+    assigned_department = st.session_state.get("teacher_department") or DEPARTMENTS[0]
+    st.title("👨‍🏫 Tutor Dashboard")
+    st.info(f"Tutor department: **{assigned_department}**")
+    c1,c2,c3 = st.columns([2.2,1.0,0.8])
+    department = c1.selectbox("🎓 B.Tech Department", DEPARTMENTS, index=DEPARTMENTS.index(assigned_department), key="dashboard_department")
+    semester = c2.selectbox("📚 Semester", SEMESTERS, index=2, key="dashboard_semester")
     if c3.button("➡️ Next Dashboard", use_container_width=True):
-        st.session_state.dashboard_view = "all_departments"
-        st.session_state.page = "all_department_analysis"
-        st.rerun()
-    
-    st.caption("Next Dashboard: combined analysis for all departments and semesters.")
-    
+        st.session_state.page = "all_department_analysis"; st.rerun()
     subjects = get_subjects(department, semester)
     if len(subjects) != 6:
-        st.error(
-            f"No complete 6-subject mapping is configured for **{department} — {semester}**. "
-            "The Tutor Dashboard will not accept marks until all 6 subjects are mapped."
-        )
+        st.error(f"No complete 6-subject mapping is configured for **{department} — {semester}**.")
         return
-
     st.success(f"📖 Active curriculum: **{department} — {semester}**")
-    st.info("🔐 Permanent storage enabled: every submitted student record is saved in the master file and archived in `data/student_records/<Department>/<Semester>/`. Only the authenticated Tutor Dashboard can delete a selected record.")
-    st.dataframe(
-        pd.DataFrame({"No.": range(1, 7), "Subject": subjects}),
-        use_container_width=True, hide_index=True
-    )
-
-    tab1, tab2, tab3, tab4, tab5 = st.tabs([
-        "➕ Add Student", "📤 Upload CSV", "👥 Student Records", "📈 K-Means Analysis", "🧠 ANN Analysis"
-    ])
-
-    with tab1:
-        manual_add_form(department, semester)
-
-    with tab2:
-        st.subheader("📤 Upload Students")
-        st.write(
-            "Each CSV row can specify its own Semester. The app ignores manually supplied subject names and "
-            "loads the six subjects from the selected B.Tech Department + that row's Semester."
-        )
-        template = template_df().to_csv(index=False).encode("utf-8")
-        st.download_button("📄 Download CSV Template", template, "student_marks_template.csv", "text/csv")
-        uploaded = st.file_uploader("Choose CSV", type=["csv"], key="student_csv_upload")
-        if uploaded is not None and st.button("🚀 Submit Uploaded Students", type="primary"):
-            try:
-                reports = uploaded_to_reports(uploaded, department)
-                valid_reports = []
-                rejected = []
-                for report in reports:
-                    reg = find_registered_student(report.get("University_ID", ""))
-                    if not reg:
-                        rejected.append(str(report.get("University_ID", "")))
-                        continue
-                    if str(reg.get("Username", "")).strip().lower() != str(report.get("Username", "")).strip().lower() or str(reg.get("Student_Name", "")).strip().lower() != str(report.get("Student_Name", "")).strip().lower():
-                        rejected.append(str(report.get("University_ID", "")))
-                        continue
-                    valid_reports.append(report)
-                if valid_reports:
-                    for report in valid_reports:
-                        upsert_report(report)
-                    st.success(f"✅ {len(valid_reports)} registered student record(s) uploaded successfully.")
-                if rejected:
-                    st.warning("⚠️ These rows were skipped because the student is not registered or the Username/Name does not match: " + ", ".join(rejected))
-                if not reports:
-                    st.warning("No valid student rows were found in the CSV.")
-            except Exception as exc:
-                st.error(f"Upload failed: {exc}")
-
-    with tab3:
+    tabs = st.tabs(["📝 Registration","📊 Mark Entry","📎 Student Files","👥 Records","📈 K-Means","👨‍🏫 Tutor Profile"])
+    with tabs[0]: tutor_registration_form(department, semester)
+    with tabs[1]: tutor_mark_entry(department, semester)
+    with tabs[2]: tutor_student_files(department, semester)
+    with tabs[3]:
         df = load_reports()
-        filtered = df[
-            df["Department"].astype(str).eq(str(department)) &
-            df["Semester"].astype(str).str.upper().eq(str(semester).upper())
-        ].copy()
+        filtered = df[(df["Department"].astype(str)==str(department)) & (df["Semester"].astype(str).str.upper()==str(semester).upper())].copy()
         st.subheader(f"Student Records — {department} — {semester} ({len(filtered)})")
-        st.caption(f"🔒 {len(filtered)} permanent stored submission(s) in this Department + Semester. Previous submissions are retained even when the same University ID is submitted again.")
         if filtered.empty:
-            st.info("No student records for this Department + Semester yet.")
+            st.info("No marks submitted yet. Registered students will appear in the Registration tab.")
         else:
-            show = filtered[["Username", "Student_Name", "University_ID", "Semester", "Department", "Created_Time"]]
-            st.dataframe(show, use_container_width=True, hide_index=True)
-            ids = show["University_ID"].astype(str).tolist()
-            selected = st.selectbox("Select University ID", ids, key="record_student_id")
-            row = filtered[filtered["University_ID"].astype(str).eq(str(selected))].iloc[0].to_dict()
-            subs = parse_subjects(row["Subjects_JSON"])
-            overall = float(np.mean([x["Overall"] for x in subs])) if subs else 0.0
-            st.metric("Selected Student Overall", f"{overall:.2f}%")
-            rows = [[x["Subject"], x["Attendance"], x["Internal"], x["Assignment"], x["Previous"], x["Overall"], x["Level"]] for x in subs]
-            st.dataframe(pd.DataFrame(rows, columns=["Subject", "Attendance", "Internal", "Assignment", "Previous", "Score", "Performance"]), use_container_width=True, hide_index=True)
-            c1, c2 = st.columns(2)
-            c1.download_button("📥 Download Student PDF", create_pdf(row), f"{selected}_Progress_Report.pdf", "application/pdf", use_container_width=True)
-            with c2:
-                st.warning("⚠️ Tutor-only action")
-                confirm_delete = st.checkbox(
-                    "I confirm I want to delete this stored submission",
-                    key=f"confirm_delete_{selected}_{row.get('Created_Time','')}"
-                )
-                if st.button(
-                    "🗑️ Delete Selected Student Record",
-                    key=f"delete_record_{selected}_{row.get('Created_Time','')}",
-                    type="secondary",
-                    use_container_width=True,
-                    disabled=not confirm_delete,
-                ):
-                    ok, message = delete_student_record(row)
-                    if ok:
-                        st.success(f"✅ {message}")
-                        st.rerun()
-                    else:
-                        st.error(message)
-
-    with tab4:
+            show=filtered[["Student_Name","University_ID","Semester","Department","Created_Time"]]
+            st.dataframe(show,use_container_width=True,hide_index=True)
+            ids=show["University_ID"].astype(str).tolist()
+            selected=st.selectbox("Select University ID",ids,key="record_student_id")
+            row=filtered[filtered["University_ID"].astype(str).eq(str(selected))].iloc[0].to_dict()
+            subs=parse_subjects(row["Subjects_JSON"])
+            overall=float(np.mean([x["Overall"] for x in subs])) if subs else 0.0
+            st.metric("Selected Student Overall",f"{overall:.2f}%")
+            rows=[[x["Subject"],x["Attendance"],x["Internal"],x["Assignment"],x["Previous"],x["Overall"],x["Level"]] for x in subs]
+            st.dataframe(pd.DataFrame(rows,columns=["Subject","Attendance","Internal","Assignment","Previous","Score","Performance"]),use_container_width=True,hide_index=True)
+            c1,c2,c3=st.columns(3)
+            c1.download_button("📥 Download Progress PDF",create_pdf(row),f"{selected}_Progress_Report.pdf","application/pdf",use_container_width=True)
+            card=create_student_card_png(row)
+            if card:
+                c2.download_button("🪪 Download Student Card",card,f"{selected}_Student_Card.png","image/png",use_container_width=True)
+            if c3.button("🗑️ Delete Marks",use_container_width=True):
+                delete_student(selected,department); st.success("Marks deleted."); st.rerun()
+    with tabs[4]:
         st.subheader(f"📈 K-Means Analysis — {department} — {semester}")
-        result = kmeans_analysis(department)
+        result=kmeans_analysis(department)
         if not result.get("available"):
-            st.warning(result.get("message", "Analysis unavailable."))
+            st.warning(result.get("message","Analysis unavailable."))
         else:
-            # Show only the selected semester in the analysis table when possible.
-            records = result["records"].copy()
-            semester_students = load_reports()
-            ids_for_sem = set(semester_students[
-                semester_students["Department"].astype(str).eq(str(department)) &
-                semester_students["Semester"].astype(str).str.upper().eq(str(semester).upper())
-            ]["University_ID"].astype(str))
-            selected_records = records[records["University_ID"].astype(str).isin(ids_for_sem)].copy()
-            st.metric("Subject records in selected semester", len(selected_records))
-            if selected_records.empty:
-                st.info("No records for the selected Department + Semester. Add students first.")
-            else:
-                st.dataframe(selected_records, use_container_width=True, hide_index=True)
+            records=result["records"].copy(); semester_students=load_reports()
+            ids_for_sem=set(semester_students[(semester_students["Department"].astype(str)==str(department))&(semester_students["Semester"].astype(str).str.upper()==str(semester).upper())]["University_ID"].astype(str))
+            selected_records=records[records["University_ID"].astype(str).isin(ids_for_sem)].copy()
+            st.metric("Subject records in selected semester",len(selected_records))
+            st.dataframe(selected_records,use_container_width=True,hide_index=True)
             st.caption(f"K-Means is calculated from all available records in the selected department. Inertia: {result['inertia']:.4f}")
-            st.markdown("### Cluster summary")
-            st.dataframe(pd.DataFrame(result["summary"]), use_container_width=True, hide_index=True)
-            st.markdown("### Cluster centroids")
-            st.dataframe(pd.DataFrame(result["centroids"]), use_container_width=True, hide_index=True)
-            st.download_button(
-                "📊 Download K-Means Analysis PDF",
-                create_kmeans_pdf(result),
-                f"{department.replace(' ', '_')}_KMeans_Analysis.pdf",
-                "application/pdf", use_container_width=True, type="primary"
-            )
-
-    with tab5:
-        st.subheader("🧠 Artificial Neural Network (ANN) Analysis")
-        st.write("A feed-forward multilayer perceptron uses attendance, internal, assignment, previous mark and study hours as input features.")
-        ann = train_ann_model()
-        if not ann.get("available"):
-            st.warning(ann.get("message", "ANN analysis unavailable."))
-        else:
-            a, b, c = st.columns(3)
-            a.metric("Training Samples", ann["training_samples"])
-            b.metric("Training Accuracy", f'{ann["training_accuracy"]:.1f}%')
-            c.metric("Output Classes", len(ann["classes"]))
-            st.info(f'🧠 Training source: {ann["training_source"]}')
-            st.dataframe(pd.DataFrame({"ANN Output Class": ann["classes"]}), use_container_width=True, hide_index=True)
-            st.caption("ANN prediction is a project-level academic indicator. It should support, not replace, tutor evaluation.")
+            st.dataframe(pd.DataFrame(result["summary"]),use_container_width=True,hide_index=True)
+            st.dataframe(pd.DataFrame(result["centroids"]),use_container_width=True,hide_index=True)
+            st.download_button("📊 Download K-Means Analysis PDF",create_kmeans_pdf(result),f"{department.replace(' ','_')}_KMeans_Analysis.pdf","application/pdf",use_container_width=True,type="primary")
+    with tabs[5]: tutor_profile_tab()
 
 # ============================================================
 # STUDENT WORKFLOW
 # ============================================================
 def student_dashboard():
     app_brand()
-    profile = st.session_state.get("student_profile")
-    if not profile:
+    student=st.session_state.get("student_report")
+    if not student:
         logout(); return
-
-    # Always refresh the latest tutor-entered record. This means a student who
-    # logged in before marks were entered will see the marks as soon as the tutor
-    # submits them and the student opens/calculates the result again.
-    latest_report = find_student(profile.get("Username", ""), profile.get("University_ID", ""))
-    st.session_state.student_report = latest_report
-
-    st.title(f"🎓 Welcome, {profile.get('Student_Name', '')}")
-    st.caption(f"University ID: {profile.get('University_ID', '')}")
-
-    if st.button("🚪 Logout", use_container_width=False):
-        log_action("Student", st.session_state.get("username", ""), "Student Logout", profile.get("University_ID", ""), profile.get("Department", ""), profile.get("Semester", ""), "Student portal logout")
+    uid=student.get("University_ID","")
+    reg=find_registration(uid)
+    report=None
+    reports=load_reports()
+    if not reports.empty:
+        x=reports[reports["University_ID"].astype(str).str.lower().eq(str(uid).lower())]
+        if not x.empty: report=x.iloc[0].to_dict()
+    profile=reg or student
+    st.title(f"🎓 Welcome, {profile.get('Student_Name','Student')}")
+    st.caption(f"University ID: {uid}  •  {profile.get('Semester','')}  •  {profile.get('Department','')}")
+    c1,c2=st.columns(2)
+    if c1.button("🪪 Generate My Smart Card",use_container_width=True,type="primary"):
+        st.session_state.smart_card_student=profile; st.session_state.page="smart_card"; st.rerun()
+    if c2.button("🚪 Logout",use_container_width=True):
+        audit("Student Logout","Student","",uid,profile.get("Department",""),profile.get("Semester",""),"Logout")
         logout()
 
-    # --------------------------------------------------------
-    # Tutor-registered student profile
-    # --------------------------------------------------------
-    st.subheader("👤 My Tutor-Registered Profile")
-    p1, p2, p3, p4 = st.columns(4)
-    p1.markdown(f'<div class="metric-card"><div class="label">👤 Student Name</div><div class="value" style="font-size:1.15rem">{profile.get("Student_Name", "—")}</div></div>', unsafe_allow_html=True)
-    p2.markdown(f'<div class="metric-card"><div class="label">🪪 University ID</div><div class="value" style="font-size:1.15rem">{profile.get("University_ID", "—")}</div></div>', unsafe_allow_html=True)
-    p3.markdown(f'<div class="metric-card"><div class="label">🏫 Department</div><div class="value" style="font-size:1.05rem">{profile.get("Department", "—")}</div></div>', unsafe_allow_html=True)
-    p4.markdown(f'<div class="metric-card"><div class="label">📚 Semester</div><div class="value">{profile.get("Semester", "—")}</div></div>', unsafe_allow_html=True)
-    st.write(f"**Registered on:** {profile.get('Registered_Time', '—')}  •  **Tutor:** {profile.get('Tutor_Username', '—')}")
+    st.subheader("👤 My Registered Profile")
+    p1,p2,p3=st.columns(3)
+    p1.metric("Student",profile.get("Student_Name","")); p2.metric("University ID",uid); p3.metric("Semester",profile.get("Semester",""))
+    st.write(f"**Department:** {profile.get('Department','')}")
 
-    report = latest_report
-    if not report:
-        st.warning("⏳ Your profile is registered by the tutor, but marks have not been entered yet.")
-        st.info("The **📊 Calculate My Mark** option will become available after your tutor submits your marks.")
-        st.button("📊 Calculate My Mark", disabled=True, use_container_width=True)
+    files=get_student_files(uid)
+    if files:
+        st.subheader("📎 Files from Tutor")
+        for path in files:
+            name=os.path.basename(path)
+            ext=os.path.splitext(name)[1].lower()
+            if ext in {".png",".jpg",".jpeg",".webp"}:
+                st.image(path,caption=name,width=240)
+            with open(path,"rb") as f:
+                st.download_button(f"📥 {name}",f.read(),name,key=f"student_file_{name}")
+
+    if not report or not str(report.get("Subjects_JSON","")).strip() or str(report.get("Subjects_JSON")) in {"[]","nan"}:
+        st.info("⏳ Your profile is registered. Marks are not submitted yet. The Calculate My Result section will appear after your tutor submits marks.")
         return
 
-    # --------------------------------------------------------
-    # Marks are visible only after the tutor has submitted them.
-    # --------------------------------------------------------
-    subjects = parse_subjects(report.get("Subjects_JSON", "[]"))
-    if not subjects:
-        st.warning("Your tutor record exists, but no subject marks have been submitted yet.")
-        st.button("📊 Calculate My Mark", disabled=True, use_container_width=True)
-        return
-
-    st.success(f"✅ Tutor marks received for **{report.get('Department', '—')} — {report.get('Semester', '—')}**.")
-    st.info("🔐 Your tutor-entered marks are read-only here. You can calculate your result, but you cannot edit the tutor marks.")
-
-    # Study hours are optional inputs used by the ANN/result analysis. The tutor
-    # marks themselves remain unchanged.
     st.subheader("📊 Calculate My Mark")
-    st.write("Enter your daily study hours and click the button below to calculate your subject-wise result.")
-    study_hours = {}
-    with st.form("student_calculate_result_form"):
-        for i, item in enumerate(subjects):
-            study_hours[item["Subject"]] = st.number_input(
-                f"{i+1}. {item['Subject']} — daily study hours",
-                min_value=0.0, max_value=6.0, value=float(item.get("Study_Hours", 0) or 0), step=0.5,
-                key=f"student_study_{i}_{report.get('Created_Time','')}"
-            )
-        calculate = st.form_submit_button("📊 Calculate My Mark", use_container_width=True, type="primary")
-
+    subjects=parse_subjects(report["Subjects_JSON"])
+    study_hours={}
+    with st.form("study_hours_form"):
+        for i,item in enumerate(subjects):
+            study_hours[item["Subject"]]=st.number_input(f"{i+1}. {item['Subject']} — hours/day",0.0,6.0,float(item.get("Study_Hours",2.0)),0.5,key=f"student_study_{i}")
+        calculate=st.form_submit_button("📊 Calculate My Result",use_container_width=True,type="primary")
     if calculate:
-        updated = []
-        ann_model_result = train_ann_model()
+        updated=[]
         for item in subjects:
-            copy = dict(item)
-            copy["Study_Hours"] = study_hours.get(item["Subject"], 0)
-            normalized = normalize_subject(copy)
-            prediction, confidence, ann_info = predict_with_ann(normalized, ann_model_result)
-            normalized["ANN_Prediction"] = prediction
-            normalized["ANN_Confidence"] = confidence
-            updated.append(normalized)
+            copy=dict(item); copy["Study_Hours"]=study_hours.get(item["Subject"],0); updated.append(normalize_subject(copy))
+        report["Subjects_JSON"]=json.dumps(updated); subjects=updated; st.session_state.student_report=report
+        audit("Calculate My Mark","Student","",uid,profile.get("Department",""),profile.get("Semester",""),"Student calculated performance")
 
-        # Keep tutor-entered values intact while updating only the student's
-        # calculation fields in the current session.
-        report_view = dict(report)
-        report_view["Subjects_JSON"] = json.dumps(updated)
-        st.session_state.student_report = report_view
-        subjects = updated
-        st.session_state.student_result_calculated = True
-        log_action("Student", st.session_state.get("username", ""), "Calculate My Mark", profile.get("University_ID", ""), profile.get("Department", ""), profile.get("Semester", ""), "Student calculated performance")
-
-    # Do not show marks until the student has explicitly clicked Calculate.
-    if not st.session_state.get("student_result_calculated", False):
-        st.info("👆 Click **Calculate My Mark** above to view your marks and performance result.")
-        return
-
-    subjects = parse_subjects(st.session_state.student_report.get("Subjects_JSON", "[]"))
-    overall = float(np.mean([x["Overall"] for x in subjects])) if subjects else 0
-
-    if overall >= 80:
-        st.balloons()
-        st.markdown(f'<div class="good-pop"><div style="font-size:4rem">🎉🏆</div><h2>Excellent Performance!</h2><p>Your marks are looking good. Keep the same consistency!</p><p>Overall score: <b>{overall:.2f}%</b></p></div>', unsafe_allow_html=True)
-    elif overall < 50:
-        st.markdown(f'<div class="sad-pop"><div style="font-size:4rem">😔📉</div><h2>Needs Improvement</h2><p>Don’t give up. Follow the subject-wise improvement methods below.</p><p>Overall score: <b>{overall:.2f}%</b></p></div>', unsafe_allow_html=True)
-    else:
-        st.info(f"📘 Your marks are available. Overall score: **{overall:.2f}%**. Check each subject below for its individual indicator.")
-
-    a, b, c = st.columns(3)
-    a.markdown(f'<div class="metric-card"><div class="label">Overall Score</div><div class="value">{overall:.2f}%</div></div>', unsafe_allow_html=True)
-    b.markdown(f'<div class="metric-card"><div class="label">Subjects</div><div class="value">{len(subjects)}</div></div>', unsafe_allow_html=True)
-    status = "Good" if overall >= 80 else "Above Average" if overall >= 65 else "Average" if overall >= 50 else "Needs Improvement"
-    c.markdown(f'<div class="metric-card"><div class="label">Status</div><div class="value">{status}</div></div>', unsafe_allow_html=True)
-
-    rows = []
-    for x in subjects:
-        rows.append([x["Subject"], f"{x['Attendance']:.0f}%", f"{x.get('Attendance_Mark', attendance_mark(x['Attendance']))}/5", f"{x['Internal']:.0f}/40", f"{x['Assignment']:.0f}/15", f"{x['Previous']:.0f}/60", f"{x['Study_Hours']:.1f} h", f"{x['Overall']:.1f}%", f"{x.get('Circle', performance_circle(x['Level']))} {x['Level']}", x.get("ANN_Prediction", "—"), f"{float(x.get('ANN_Confidence', 0)):.1f}%" ])
-    st.subheader("📊 My Marks — Subject-wise Result")
-    st.dataframe(pd.DataFrame(rows, columns=["Subject", "Attendance", "Att. Mark", "Internal", "Assignment", "Previous", "Study", "Score", "Performance", "ANN Prediction", "ANN Confidence"]), use_container_width=True, hide_index=True)
-
-    st.subheader("🎯 Subject-wise Performance & Improvement")
-    for x in subjects:
-        circle = x.get('Circle', performance_circle(x['Level']))
-        with st.expander(f"{circle} {x['Subject']} — {x['Level']} — {x['Overall']:.1f}%"):
-            st.markdown(f"**Tutor-entered marks:** Attendance **{x['Attendance']:.0f}% → {x.get('Attendance_Mark', attendance_mark(x['Attendance']))}/5**, Internal **{x['Internal']:.0f}/40**, Assignment **{x['Assignment']:.0f}/15**, Previous **{x['Previous']:.0f}/60**.  **Study:** {x['Study_Hours']:.1f} h/day.")
-            if x.get("ANN_Prediction"):
-                st.info(f"🧠 ANN Prediction: **{x['ANN_Prediction']}**  •  Confidence: **{float(x.get('ANN_Confidence', 0)):.1f}%**")
-            st.success("💚 " + x.get("Compliment", "Keep progressing!"))
-            st.markdown("**How to improve:**")
-            for recommendation in x["Recommendations"]:
-                st.write("• " + recommendation)
-
-    st.caption("🔴 Needs Improvement  •  🟠 Average  •  🟡 Above Average  •  🟢 Good")
-
-    st.download_button(
-        "📥 Download Progress Report PDF",
-        create_pdf(st.session_state.student_report),
-        f"{profile.get('University_ID', 'Student')}_Progress_Report.pdf",
-        "application/pdf",
-        use_container_width=True,
-        type="primary",
-    )
+    subjects=parse_subjects(st.session_state.student_report["Subjects_JSON"])
+    overall=float(np.mean([x["Overall"] for x in subjects])) if subjects else 0
+    if any(float(x.get("Study_Hours",0))>0 for x in subjects):
+        if overall>=80:
+            st.balloons(); st.markdown(f'<div class="good-pop"><div style="font-size:3rem">🎉🏆</div><h2>Good Performance</h2><p>Keep your consistency. Overall score: <b>{overall:.2f}%</b></p></div>',unsafe_allow_html=True)
+        elif overall<50:
+            st.markdown(f'<div class="sad-pop"><div style="font-size:3rem">😔📉</div><h2>Needs Improvement</h2><p>Follow the subject-wise improvement methods. Overall score: <b>{overall:.2f}%</b></p></div>',unsafe_allow_html=True)
+        else:
+            st.info(f"📘 Overall score: **{overall:.2f}%**")
+        a,b,c=st.columns(3)
+        a.markdown(f'<div class="metric-card"><div class="label">Overall Score</div><div class="value">{overall:.2f}%</div></div>',unsafe_allow_html=True)
+        b.markdown(f'<div class="metric-card"><div class="label">Subjects</div><div class="value">{len(subjects)}</div></div>',unsafe_allow_html=True)
+        status="Good" if overall>=80 else "Above Average" if overall>=65 else "Average" if overall>=50 else "Needs Improvement"
+        c.markdown(f'<div class="metric-card"><div class="label">Status</div><div class="value">{status}</div></div>',unsafe_allow_html=True)
+        rows=[]
+        for x in subjects:
+            rows.append([x["Subject"],f"{x['Attendance']:.0f}%",f"{x.get('Attendance_Mark',attendance_mark(x['Attendance']))}/5",f"{x['Internal']:.0f}/40",f"{x['Assignment']:.0f}/15",f"{x['Previous']:.0f}/60",f"{x['Study_Hours']:.1f} h",f"{x['Overall']:.1f}%",f"{x.get('Circle',performance_circle(x['Level']))} {x['Level']}"])
+        st.subheader("📊 Subject-wise Result")
+        st.dataframe(pd.DataFrame(rows,columns=["Subject","Attendance","Att. Mark","Internal","Assignment","Previous","Study","Score","Performance"]),use_container_width=True,hide_index=True)
+        st.subheader("🎯 Improvement")
+        for x in subjects:
+            with st.expander(f"{x.get('Circle',performance_circle(x['Level']))} {x['Subject']} — {x['Level']} — {x['Overall']:.1f}%"):
+                st.write(f"Attendance **{x['Attendance']:.0f}%**, Internal **{x['Internal']:.0f}/40**, Assignment **{x['Assignment']:.0f}/15**, Previous **{x['Previous']:.0f}/60**, Study **{x['Study_Hours']:.1f} h/day**.")
+                st.success("💚 "+x.get("Compliment","Keep progressing!"))
+                for recommendation in x.get("Recommendations",[]): st.write("• "+recommendation)
+        st.caption("🔴 Needs Improvement  •  🟠 Average  •  🟡 Above Average  •  🟢 Good")
+        c1,c2=st.columns(2)
+        c1.download_button("📥 Download Progress Report PDF",create_pdf(st.session_state.student_report),f"{uid}_Progress_Report.pdf","application/pdf",use_container_width=True,type="primary")
+        card=create_student_card_png(profile)
+        if card: c2.download_button("🪪 Download Smart Card PNG",card,f"{uid}_Smart_Card.png","image/png",use_container_width=True)
 
 # Clear obsolete widget keys from earlier versions if they exist.
 for _old_key in ("active_department", "manual_department_selector", "manual_semester_selector"):
@@ -1893,8 +1371,8 @@ elif st.session_state.page == "teacher_login":
     teacher_login()
 elif st.session_state.page == "student_login":
     student_login()
-elif st.session_state.page == "teacher_portal" and st.session_state.logged_in and st.session_state.role == "teacher":
-    tutor_portal()
+elif st.session_state.page == "smart_card":
+    smart_card_page()
 elif st.session_state.page == "teacher_dashboard" and st.session_state.logged_in and st.session_state.role == "teacher":
     teacher_dashboard()
 elif st.session_state.page == "all_department_analysis" and st.session_state.logged_in and st.session_state.role == "teacher":
