@@ -39,6 +39,7 @@ REPORT_FILE = os.path.join(DATA_DIR, "student_reports.csv")
 # an individual JSON snapshot. Tutor actions never delete archived records.
 STUDENT_RECORDS_DIR = os.path.join(DATA_DIR, "student_records")
 STUDENT_REGISTRATIONS_FILE = os.path.join(DATA_DIR, "student_registrations.csv")
+AUDIT_LOG_FILE = os.path.join(DATA_DIR, "audit_log.csv")
 os.makedirs(STUDENT_RECORDS_DIR, exist_ok=True)
 
 SEMESTERS = [f"S{i}" for i in range(1, 9)]
@@ -307,7 +308,8 @@ def empty_df():
     return pd.DataFrame(columns=REPORT_COLUMNS)
 
 
-REGISTRATION_COLUMNS = ["Username", "University_ID", "Student_Name", "Registered_Time"]
+REGISTRATION_COLUMNS = ["Username", "University_ID", "Student_Name", "Department", "Semester", "Tutor_Username", "Registered_Time"]
+AUDIT_COLUMNS = ["Timestamp", "Role", "Username", "Action", "University_ID", "Department", "Semester", "Details"]
 
 def empty_registration_df():
     return pd.DataFrame(columns=REGISTRATION_COLUMNS)
@@ -327,36 +329,60 @@ def load_registrations():
 def save_registrations(df):
     df.to_csv(STUDENT_REGISTRATIONS_FILE, index=False)
 
-def register_student(username, uid, name):
+def log_action(role, username, action, university_id="", department="", semester="", details=""):
+    """Local audit trail used by the separate Principal monitoring app."""
+    row = pd.DataFrame([{
+        "Timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "Role": role, "Username": username, "Action": action,
+        "University_ID": university_id, "Department": department,
+        "Semester": semester, "Details": details,
+    }], columns=AUDIT_COLUMNS)
+    try:
+        if os.path.exists(AUDIT_LOG_FILE):
+            old = pd.read_csv(AUDIT_LOG_FILE)
+            for col in AUDIT_COLUMNS:
+                if col not in old.columns: old[col] = ""
+            old = old[AUDIT_COLUMNS]
+        else:
+            old = pd.DataFrame(columns=AUDIT_COLUMNS)
+        pd.concat([old, row], ignore_index=True).to_csv(AUDIT_LOG_FILE, index=False)
+    except Exception:
+        pass
+
+def register_student(username, uid, name, department, semester, tutor_username):
     username, uid, name = username.strip(), uid.strip(), name.strip()
+    department, semester, tutor_username = department.strip(), semester.strip().upper(), tutor_username.strip()
     df = load_registrations()
-    if not username or not uid or not name:
-        return False, "Enter Username, University ID and Student Name."
+    if not username or not uid or not name or not department or not semester:
+        return False, "Enter Username, University ID, Student Name, Department and Semester."
+    if department not in DEPARTMENTS or semester not in SEMESTERS:
+        return False, "Select a valid B.Tech Department and Semester."
     duplicate = df[
         df["University_ID"].astype(str).str.strip().str.lower().eq(uid.lower()) |
-        (df["Username"].astype(str).str.strip().str.lower().eq(username.lower()))
+        df["Username"].astype(str).str.strip().str.lower().eq(username.lower())
     ]
     if not duplicate.empty:
         return False, "This Username or University ID is already registered."
     row = pd.DataFrame([{
         "Username": username, "University_ID": uid, "Student_Name": name,
+        "Department": department, "Semester": semester,
+        "Tutor_Username": tutor_username,
         "Registered_Time": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     }], columns=REGISTRATION_COLUMNS)
     save_registrations(pd.concat([df, row], ignore_index=True))
-    return True, f"Student {name} registered successfully."
+    log_action("Tutor", tutor_username, "Student Registration", uid, department, semester, f"Registered {name}")
+    return True, f"Student {name} registered successfully for {department} — {semester}."
 
 def find_registered_student(uid):
     df = load_registrations()
-    if df.empty:
-        return None
+    if df.empty: return None
     found = df[df["University_ID"].astype(str).str.strip().str.lower().eq(str(uid).strip().lower())]
     return found.iloc[-1].to_dict() if not found.empty else None
 
 def find_registered_credentials(username, uid):
     """Find a tutor-registered student using both Username and University ID."""
     df = load_registrations()
-    if df.empty:
-        return None
+    if df.empty: return None
     found = df[
         df["Username"].astype(str).str.strip().str.lower().eq(str(username).strip().lower()) &
         df["University_ID"].astype(str).str.strip().str.lower().eq(str(uid).strip().lower())
@@ -1258,49 +1284,37 @@ def teacher_login():
             st.session_state.teacher_department = account["department"]
             st.session_state.active_department = account["department"]
             st.session_state.teacher_menu_view = "menu"
+            log_action("Tutor", username.strip(), "Tutor Login", "", account["department"], "", "Successful tutor login")
             st.session_state.page = "teacher_portal"
             st.rerun()
         else:
             st.error("Invalid tutor username or password.")
 
 
-def valid_student_password(password):
-    # Exactly 9 characters: BTECH + year 2000–2022.
-    return bool(re.fullmatch(r"BTECH(?:200\d|201\d|202[0-2])", password or ""))
-
-
 def student_login():
-    login_shell("Student Login", "Login using the profile registered by your tutor")
-    st.info("💡 Example: Username **Aromal kv**  •  University ID **SNM25CE001**  •  Password **BTECH2007**")
+    login_shell("Student Login", "Use the Username and University ID registered by your tutor")
+    st.info("💡 Example: Username **Aromal kv**  •  University ID **SNM25CE001**  •  🔓 No password required")
     with st.form("student_login_form"):
-        username = st.text_input("Username", placeholder="e.g. Aromal kv")
-        uid = st.text_input("University ID", placeholder="e.g. SNM25CE001")
-        password = st.text_input("Password", type="password", placeholder="Example: BTECH2007", max_chars=9)
-        st.caption("Password format: BTECH + year from 2000 to 2022, e.g. BTECH2007")
+        username = st.text_input("👤 Username", placeholder="e.g. Aromal kv")
+        uid = st.text_input("🪪 University ID", placeholder="e.g. SNM25CE001")
         c1, c2 = st.columns(2)
-        login = c1.form_submit_button("🔐 Login", use_container_width=True, type="primary")
+        login = c1.form_submit_button("🎓 Enter Student Portal", use_container_width=True, type="primary")
         back = c2.form_submit_button("← Back", use_container_width=True)
     if back:
         st.session_state.page = "home"; st.rerun()
     if login:
-        if not valid_student_password(password):
-            st.error("Invalid password format. Use BTECH followed by a year from 2000–2022.")
-            return
-
-        # Student access starts from the tutor-registered profile. Marks are
-        # deliberately checked separately, so a registered student can log in
-        # and see their profile even before the tutor enters marks.
         registered = find_registered_credentials(username, uid)
         if not registered:
-            st.error("No tutor-registered student profile found. Ask your tutor to register your Username and University ID first.")
+            st.error("❌ No tutor-registered profile found. Check your Username and University ID, or contact your tutor.")
             return
-
         latest_report = find_student(registered["Username"], registered["University_ID"])
         st.session_state.logged_in = True
         st.session_state.role = "student"
         st.session_state.username = str(registered["Username"]).strip()
         st.session_state.student_profile = registered
         st.session_state.student_report = latest_report
+        st.session_state.student_result_calculated = False
+        log_action("Student", st.session_state.username, "Student Login", registered["University_ID"], registered.get("Department", ""), registered.get("Semester", ""), "Student portal login")
         st.session_state.page = "student_dashboard"
         st.rerun()
 
@@ -1405,46 +1419,54 @@ def kmeans_analysis(department):
 # ============================================================
 def tutor_portal():
     app_brand()
+    assigned_department = st.session_state.get("teacher_department")
     st.title("👨‍🏫 Tutor Control Center")
-    st.caption(f"Logged in as: **{st.session_state.get('username', '')}**")
-    st.info("Choose what you want to do. Student registration must be completed before entering marks.")
+    st.caption(f"Logged in as: **{st.session_state.get('username', '')}**  •  🏫 Department: **{assigned_department}**")
+    st.info("🔐 Tutor permissions are department-aware. You can register students in your assigned department and enter marks only for registered students in that department + semester.")
+    st.markdown("""
+    <div class="glass" style="margin:18px 0;padding:18px">
+      <div style="font-size:1.35rem;font-weight:800">🚀 Smart Tutor Workflow</div>
+      <div style="color:#cbd5e1;margin-top:8px">🪪 Register → 🏫 Department → 📚 Semester → 📝 Marks → 🧠 ANN → 📊 Result</div>
+      <div style="color:#94a3b8;margin-top:6px">🔒 Department + semester permission • 💾 Persistent records • ⚡ Live student portal update</div>
+    </div>
+    """, unsafe_allow_html=True)
 
     c1, c2 = st.columns(2)
     with c1:
         st.markdown("### 🧑‍🎓 Student Registration")
-        st.write("Register a student using Username, University ID and Name.")
-        if st.button("Open Student Registration", use_container_width=True, type="primary"):
-            st.session_state.teacher_menu_view = "registration"
-            st.rerun()
+        st.write("Create the student's official portal profile with department + semester.")
+        if st.button("🪪 Open Student Registration", use_container_width=True, type="primary"):
+            st.session_state.teacher_menu_view = "registration"; st.rerun()
     with c2:
         st.markdown("### 📝 Student Mark Entry")
-        st.write("Enter marks only for students who are already registered.")
-        if st.button("Open Student Mark Entry", use_container_width=True, type="primary"):
-            st.session_state.teacher_menu_view = "marks"
-            st.session_state.page = "teacher_dashboard"
-            st.rerun()
+        st.write("Enter marks only for students already registered in your department + selected semester.")
+        if st.button("📊 Open Student Mark Entry", use_container_width=True, type="primary"):
+            st.session_state.teacher_menu_view = "marks"; st.session_state.page = "teacher_dashboard"; st.rerun()
 
     st.divider()
     if st.session_state.get("teacher_menu_view") == "registration":
-        st.subheader("🧑‍🎓 Register Student")
+        st.subheader("🧑‍🎓 Register Student Profile")
+        st.success(f"🏫 Tutor department locked to: **{assigned_department}**")
+        st.caption("✨ Every registration creates a portal identity. Students later sign in with Username + University ID only.")
         with st.form("student_registration_form"):
-            username = st.text_input("Student Username")
-            uid = st.text_input("University ID")
-            name = st.text_input("Student Name")
-            submitted = st.form_submit_button("✅ Submit Registration", use_container_width=True, type="primary")
+            username = st.text_input("👤 Student Username", placeholder="e.g. Aromal kv")
+            uid = st.text_input("🪪 University ID", placeholder="e.g. SNM25CE001")
+            name = st.text_input("📛 Student Name", placeholder="e.g. Aromal K V")
+            semester = st.selectbox("📚 Student Semester", SEMESTERS)
+            st.caption("🔒 Department is controlled by your tutor account.")
+            submitted = st.form_submit_button("🚀 Submit Registration", use_container_width=True, type="primary")
         if submitted:
-            ok, msg = register_student(username, uid, name)
+            ok, msg = register_student(username, uid, name, assigned_department, semester, st.session_state.get("username", ""))
             (st.success if ok else st.error)(msg)
         reg = load_registrations()
-        st.subheader(f"📋 Registered Students ({len(reg)})")
-        if reg.empty:
-            st.info("No students registered yet.")
-        else:
-            st.dataframe(reg, use_container_width=True, hide_index=True)
+        mine = reg[reg["Department"].astype(str).eq(str(assigned_department))] if not reg.empty else reg
+        st.subheader(f"📋 Registered Students — {assigned_department} ({len(mine)})")
+        if mine.empty: st.info("No students registered in your department yet.")
+        else: st.dataframe(mine, use_container_width=True, hide_index=True)
 
     if st.button("🚪 Logout", use_container_width=True):
+        log_action("Tutor", st.session_state.get("username", ""), "Tutor Logout")
         logout()
-
 
 def manual_add_form(department, semester):
     st.subheader("➕ Add One Student")
@@ -1466,8 +1488,13 @@ def manual_add_form(department, semester):
     )
 
     registered = load_registrations()
+    if not registered.empty:
+        registered = registered[
+            registered["Department"].astype(str).str.strip().eq(str(department).strip()) &
+            registered["Semester"].astype(str).str.strip().str.upper().eq(str(semester).strip().upper())
+        ].reset_index(drop=True)
     if registered.empty:
-        st.warning("No registered students found. Go to Tutor Control Center → Student Registration first.")
+        st.warning(f"🔒 No registered students found for **{department} — {semester}**. Only department + semester matched registrations can receive marks.")
         return
 
     registered_display = registered.apply(
@@ -1509,14 +1536,22 @@ def manual_add_form(department, semester):
         )
 
     if submitted:
-        if not find_registered_student(uid):
+        reg_check = find_registered_student(uid)
+        if not reg_check:
             st.error("This student is not registered. Register the student first.")
+            return
+        if str(reg_check.get("Department", "")).strip() != str(department).strip() or str(reg_check.get("Semester", "")).strip().upper() != str(semester).strip().upper():
+            st.error("🔒 Permission denied: this student registration does not match the selected Department + Semester.")
+            return
+        if str(st.session_state.get("teacher_department", "")).strip() != str(department).strip():
+            st.error("🔒 Permission denied: tutor can enter marks only for the tutor-assigned department.")
             return
         if len(subjects) != 6:
             st.error("This project requires exactly 6 subjects for the selected Semester + Department.")
             return
         report = make_report(username, name, uid, semester, department, values)
         upsert_report(report)
+        log_action("Tutor", st.session_state.get("username", ""), "Student Mark Submission", uid, department, semester, f"Submitted marks for {name}")
         st.success(f"✅ {name} saved under {department} — {semester}.")
         st.session_state["last_added_uid"] = uid.strip()
         st.session_state["last_added_department"] = department
@@ -1543,9 +1578,9 @@ def teacher_dashboard():
     # the selected B.Tech department + semester.
     c1, c2, c3 = st.columns([2.2, 1.0, 0.7])
     department = c1.selectbox(
-        "🎓 B.Tech Department",
-        DEPARTMENTS,
-        index=DEPARTMENTS.index(assigned_department),
+        "🎓 B.Tech Department — Tutor Permission",
+        [assigned_department],
+        index=0,
         key="dashboard_department",
     )
     semester = c2.selectbox(
@@ -1725,17 +1760,19 @@ def student_dashboard():
     st.caption(f"University ID: {profile.get('University_ID', '')}")
 
     if st.button("🚪 Logout", use_container_width=False):
+        log_action("Student", st.session_state.get("username", ""), "Student Logout", profile.get("University_ID", ""), profile.get("Department", ""), profile.get("Semester", ""), "Student portal logout")
         logout()
 
     # --------------------------------------------------------
     # Tutor-registered student profile
     # --------------------------------------------------------
     st.subheader("👤 My Tutor-Registered Profile")
-    p1, p2, p3 = st.columns(3)
-    p1.markdown(f'<div class="metric-card"><div class="label">Student Name</div><div class="value" style="font-size:1.25rem">{profile.get("Student_Name", "—")}</div></div>', unsafe_allow_html=True)
-    p2.markdown(f'<div class="metric-card"><div class="label">Username</div><div class="value" style="font-size:1.25rem">{profile.get("Username", "—")}</div></div>', unsafe_allow_html=True)
-    p3.markdown(f'<div class="metric-card"><div class="label">University ID</div><div class="value" style="font-size:1.25rem">{profile.get("University_ID", "—")}</div></div>', unsafe_allow_html=True)
-    st.write(f"**Registered on:** {profile.get('Registered_Time', '—')}")
+    p1, p2, p3, p4 = st.columns(4)
+    p1.markdown(f'<div class="metric-card"><div class="label">👤 Student Name</div><div class="value" style="font-size:1.15rem">{profile.get("Student_Name", "—")}</div></div>', unsafe_allow_html=True)
+    p2.markdown(f'<div class="metric-card"><div class="label">🪪 University ID</div><div class="value" style="font-size:1.15rem">{profile.get("University_ID", "—")}</div></div>', unsafe_allow_html=True)
+    p3.markdown(f'<div class="metric-card"><div class="label">🏫 Department</div><div class="value" style="font-size:1.05rem">{profile.get("Department", "—")}</div></div>', unsafe_allow_html=True)
+    p4.markdown(f'<div class="metric-card"><div class="label">📚 Semester</div><div class="value">{profile.get("Semester", "—")}</div></div>', unsafe_allow_html=True)
+    st.write(f"**Registered on:** {profile.get('Registered_Time', '—')}  •  **Tutor:** {profile.get('Tutor_Username', '—')}")
 
     report = latest_report
     if not report:
@@ -1789,6 +1826,7 @@ def student_dashboard():
         st.session_state.student_report = report_view
         subjects = updated
         st.session_state.student_result_calculated = True
+        log_action("Student", st.session_state.get("username", ""), "Calculate My Mark", profile.get("University_ID", ""), profile.get("Department", ""), profile.get("Semester", ""), "Student calculated performance")
 
     # Do not show marks until the student has explicitly clicked Calculate.
     if not st.session_state.get("student_result_calculated", False):
