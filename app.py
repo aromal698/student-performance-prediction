@@ -560,51 +560,154 @@ def get_tutor_profile(username):
 
 def get_tutor_credit_score(username): return float(get_tutor_profile(username).get("Credit_Score",0.0))
 
-def load_smart_card_registrations(): return _load_generic_csv(SMART_CARD_FILE,SMART_CARD_COLUMNS)
+def load_smart_card_registrations():
+    """Load local Smart Card records with a stable schema."""
+    return _load_generic_csv(SMART_CARD_FILE, SMART_CARD_COLUMNS)
+
+
+def _clean_smart_card_value(value):
+    if value is None:
+        return ""
+    if isinstance(value, float) and pd.isna(value):
+        return ""
+    return str(value).strip()
+
+
+def _smart_card_cloud_find(sb, university_id):
+    """Return the latest cloud Smart Card for a university ID, or None."""
+    try:
+        rows = (
+            sb.table("smart_cards")
+            .select("*")
+            .eq("university_id", str(university_id).strip())
+            .order("submitted_at", desc=True)
+            .limit(1)
+            .execute()
+            .data
+            or []
+        )
+        return rows[0] if rows else None
+    except Exception:
+        return None
+
+
+def _smart_card_cloud_payload(row):
+    """Build a Supabase payload without sending invalid empty values."""
+    payload = {
+        "registration_id": _clean_smart_card_value(row.get("Registration_ID"))
+            or _clean_smart_card_value(row.get("University_ID")),
+        "university_id": _clean_smart_card_value(row.get("University_ID")) or None,
+        "name": _clean_smart_card_value(row.get("Student_Name")) or "Student",
+        "dob": _clean_smart_card_value(row.get("DOB")) or None,
+        "blood_group": _clean_smart_card_value(row.get("Blood_Group")) or None,
+        "address": _clean_smart_card_value(row.get("Address")) or None,
+        "pin_code": _clean_smart_card_value(row.get("PIN_Code")) or None,
+        "studied_college": _clean_smart_card_value(row.get("Studied_College")) or None,
+        "department": _clean_smart_card_value(row.get("Department")) or None,
+        "semester": _clean_smart_card_value(row.get("Semester")) or None,
+        "university_name": _clean_smart_card_value(row.get("University_Name")) or None,
+    }
+    cgpa = _clean_smart_card_value(row.get("CGPA"))
+    if cgpa:
+        payload["cgpa"] = float(cgpa)
+    else:
+        payload["cgpa"] = None
+    return payload
+
 
 def save_smart_card_registration(data):
-    """Save Smart Card locally and to Supabase without hiding sync errors."""
-    df=load_smart_card_registrations()
-    row={c:data.get(c,"") for c in SMART_CARD_COLUMNS}
-    row["Registration_ID"]=str(row.get("Registration_ID","")).strip()
-    row["University_ID"]=str(row.get("University_ID","")).strip()
-    row["Student_Name"]=str(row.get("Student_Name","")).strip()
-    row["CGPA"]=str(row.get("CGPA","")).strip()
-    row["Submitted_Time"]=datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    if not row["Registration_ID"]:
-        row["Registration_ID"]=row["University_ID"]
-    # Update by University ID so one student always has one current card.
-    mask=df["University_ID"].astype(str).str.lower().eq(row["University_ID"].lower())
-    if mask.any():
-        df.loc[mask,list(row.keys())]=list(row.values())
-    else:
-        df=pd.concat([df,pd.DataFrame([row])],ignore_index=True)
-    df.to_csv(SMART_CARD_FILE,index=False)
+    """Save/update a Smart Card locally and safely sync the same card to Supabase.
 
-    sb_error=None
+    The cloud update first looks up the existing card by University ID. This avoids
+    duplicate cards when a student changes the Registration ID later.
+    """
+    df = load_smart_card_registrations()
+    row = {c: _clean_smart_card_value(data.get(c, "")) for c in SMART_CARD_COLUMNS}
+
+    uid = row["University_ID"]
+    if not uid:
+        raise ValueError("University ID is required for Smart Card registration.")
+
+    if not row["Registration_ID"]:
+        row["Registration_ID"] = uid
+
+    row["Submitted_Time"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    # One local card per University ID.
+    mask = df["University_ID"].astype(str).str.strip().str.casefold().eq(uid.casefold())
+    if mask.any():
+        first_index = df.index[mask][0]
+        for col in SMART_CARD_COLUMNS:
+            df.at[first_index, col] = row.get(col, "")
+        # Remove accidental duplicate local records for the same student.
+        duplicate_indexes = df.index[mask][1:]
+        if len(duplicate_indexes):
+            df = df.drop(index=duplicate_indexes)
+    else:
+        df = pd.concat([df, pd.DataFrame([row])], ignore_index=True)
+
+    df.to_csv(SMART_CARD_FILE, index=False)
+
+    # Cloud sync is deliberately non-fatal: the student must still be able to
+    # view the card even if Supabase is temporarily unavailable.
     try:
-        sb=_get_shared_supabase()
+        sb = _get_shared_supabase()
         if sb is not None:
-            payload={
-                "registration_id": row["Registration_ID"], "university_id": row["University_ID"] or None,
-                "name": row["Student_Name"], "dob": row["DOB"] or None, "blood_group": row["Blood_Group"],
-                "address": row["Address"], "pin_code": row["PIN_Code"], "studied_college": row["Studied_College"],
-                "department": row["Department"], "semester": row["Semester"],
-                "cgpa": float(row["CGPA"]) if row["CGPA"] else None,
-                "university_name": row["University_Name"]
-            }
-            sb.table("smart_cards").upsert(payload, on_conflict="registration_id").execute()
+            payload = _smart_card_cloud_payload(row)
+            old = _smart_card_cloud_find(sb, uid)
+            if old and old.get("registration_id"):
+                sb.table("smart_cards").update(payload).eq(
+                    "registration_id", old["registration_id"]
+                ).execute()
+            else:
+                sb.table("smart_cards").upsert(
+                    payload, on_conflict="registration_id"
+                ).execute()
     except Exception as exc:
-        sb_error=str(exc)
-    if sb_error:
-        st.warning("Smart Card was saved on this app, but cloud sync failed. Principal may not see the new card until Supabase is fixed: " + sb_error)
+        # Do not expose a long Supabase traceback to the student.
+        st.info(
+            "Smart Card saved successfully on this app. Cloud sync is temporarily "
+            "unavailable, so the Principal may see it after Supabase is restored."
+        )
+
     return row
 
+
 def find_smart_card_registration(uid):
-    df=load_smart_card_registrations()
-    if df.empty:return None
-    x=df[df["University_ID"].astype(str).str.lower().eq(str(uid).strip().lower())]
-    return x.iloc[0].to_dict() if not x.empty else None
+    """Find a Smart Card locally first, then fall back to Supabase."""
+    clean_uid = _clean_smart_card_value(uid)
+    if not clean_uid:
+        return None
+
+    df = load_smart_card_registrations()
+    if not df.empty:
+        x = df[df["University_ID"].astype(str).str.strip().str.casefold().eq(clean_uid.casefold())]
+        if not x.empty:
+            return x.iloc[-1].to_dict()
+
+    try:
+        sb = _get_shared_supabase()
+        if sb is not None:
+            cloud = _smart_card_cloud_find(sb, clean_uid)
+            if cloud:
+                return {
+                    "Registration_ID": cloud.get("registration_id", clean_uid) or clean_uid,
+                    "University_ID": cloud.get("university_id", clean_uid) or clean_uid,
+                    "Student_Name": cloud.get("name", ""),
+                    "DOB": cloud.get("dob", "") or "",
+                    "Blood_Group": cloud.get("blood_group", "") or "",
+                    "Address": cloud.get("address", "") or "",
+                    "PIN_Code": cloud.get("pin_code", "") or "",
+                    "Studied_College": cloud.get("studied_college", "") or "",
+                    "Department": cloud.get("department", "") or "",
+                    "Semester": cloud.get("semester", "") or "",
+                    "CGPA": "" if cloud.get("cgpa") is None else str(cloud.get("cgpa")),
+                    "University_Name": cloud.get("university_name", "") or "",
+                    "Submitted_Time": cloud.get("submitted_at", "") or "",
+                }
+    except Exception:
+        pass
+    return None
 
 def hide_smart_card(): st.session_state.smart_card_hidden=True
 
@@ -1216,71 +1319,255 @@ def student_login():
 
 
 def smart_card_page():
-    app_brand(); st.title("🪪 Student Smart Card Registration")
-    st.caption("Colorful student identity card • large readable text • full details • visible to the student and Principal")
-    uid=st.session_state.get("student_report",{}).get("University_ID","")
-    if not uid: uid=st.text_input("University ID",placeholder="e.g. SNM25CE001")
-    reg=find_registration(uid) if uid else None
-    if not reg and uid:
-        try:
-            sb=_get_shared_supabase()
-            if sb is not None:
-                cloud=sb.table("students").select("*").eq("university_id",uid.strip()).limit(1).execute().data or []
-                if cloud:
-                    r=cloud[0]; reg={"University_ID":r.get("university_id",""),"Student_Name":r.get("student_name",""),"Department":r.get("department",""),"Semester":r.get("semester","")}
-        except Exception:
-            pass
-    if not reg:
-        st.warning("Student profile was not found. Use the Student Profile Lookup with University ID + Student Name first, or register with a Tutor.")
-        if st.button("← Back to Home"): st.session_state.page="home"; st.rerun()
+    """Student Smart Card registration/view page.
+
+    Works for students already registered by a tutor and also supports a
+    University-ID lookup from Supabase/local data. It never requires marks.
+    """
+    app_brand()
+    st.title("🪪 Student Smart Card")
+    st.caption("Full student details • large readable card • colorful identity-card design")
+
+    logged_student = st.session_state.get("student_report") or {}
+    uid = _clean_smart_card_value(logged_student.get("University_ID"))
+
+    if not uid:
+        uid = st.text_input("University ID", placeholder="e.g. SNM25CE001").strip()
+
+    if not uid:
+        st.info("Enter your University ID to continue.")
+        if st.button("← Back to Home", use_container_width=True):
+            st.session_state.page = "home"
+            st.rerun()
         return
-    existing=find_smart_card_registration(uid)
-    groups=["A+","A-","B+","B-","AB+","AB-","O+","O-"]
-    with st.form("smart_card_registration_form"):
-        c1,c2=st.columns(2)
-        registration_id=c1.text_input("Registration ID *",value=str(existing.get("Registration_ID",uid)) if existing else str(uid))
-        name=c2.text_input("Name *",value=str(existing.get("Student_Name",reg.get("Student_Name",""))) if existing else str(reg.get("Student_Name","")))
-        c1,c2=st.columns(2)
-        try: dob_default=datetime.strptime(str(existing.get("DOB")),"%Y-%m-%d").date() if existing and str(existing.get("DOB","")) else datetime(2007,1,1).date()
-        except Exception: dob_default=datetime(2007,1,1).date()
-        dob=c1.date_input("DOB *",value=dob_default)
-        blood=c2.selectbox("Blood Group *",groups,index=groups.index(existing.get("Blood_Group")) if existing and existing.get("Blood_Group") in groups else 0)
-        address=st.text_area("Full Address *",value=str(existing.get("Address","")) if existing else "",height=90)
-        c1,c2=st.columns(2)
-        pin=c1.text_input("PIN Code *",value=str(existing.get("PIN_Code","")) if existing else "")
-        college=c2.text_input("Studied College *",value=str(existing.get("Studied_College","")) if existing else "")
-        c1,c2=st.columns(2)
-        department=c1.text_input("Department",value=str(reg.get("Department",""),),disabled=True)
-        semester=c2.text_input("Semester",value=str(reg.get("Semester","")),disabled=True)
-        c1,c2=st.columns(2)
-        cgpa=c1.text_input("CGPA (optional)",value=str(existing.get("CGPA","")) if existing else "")
-        university=c2.text_input("University Name *",value=str(existing.get("University_Name","")) if existing else "APJ Abdul Kalam Technological University")
-        submit=st.form_submit_button("💾 Save / Update Smart Card",type="primary",use_container_width=True)
+
+    # Registered student profile: local first, cloud fallback.
+    reg = find_registration(uid)
+    if not reg:
+        try:
+            sb = _get_shared_supabase()
+            if sb is not None:
+                cloud_rows = (
+                    sb.table("students")
+                    .select("university_id,student_name,department,semester,registered_at")
+                    .eq("university_id", uid)
+                    .limit(1)
+                    .execute()
+                    .data
+                    or []
+                )
+                if cloud_rows:
+                    r = cloud_rows[0]
+                    reg = {
+                        "University_ID": r.get("university_id", uid),
+                        "Student_Name": r.get("student_name", ""),
+                        "Department": r.get("department", ""),
+                        "Semester": r.get("semester", ""),
+                        "Registered_Time": r.get("registered_at", ""),
+                    }
+        except Exception:
+            reg = None
+
+    if not reg:
+        st.error("Student profile not found. Please register with your tutor first.")
+        if st.button("← Back", use_container_width=True):
+            st.session_state.page = "home"
+            st.rerun()
+        return
+
+    existing = find_smart_card_registration(uid)
+    groups = ["A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"]
+
+    with st.form("student_smart_card_form", clear_on_submit=False):
+        st.subheader("Enter / Update Full Details")
+
+        c1, c2 = st.columns(2)
+        registration_id = c1.text_input(
+            "Registration ID *",
+            value=_clean_smart_card_value((existing or {}).get("Registration_ID")) or uid,
+        )
+        name = c2.text_input(
+            "Student Name *",
+            value=_clean_smart_card_value((existing or {}).get("Student_Name"))
+            or _clean_smart_card_value(reg.get("Student_Name")),
+        )
+
+        c1, c2 = st.columns(2)
+        old_dob = _clean_smart_card_value((existing or {}).get("DOB"))
+        try:
+            dob_default = datetime.strptime(old_dob, "%Y-%m-%d").date() if old_dob else datetime(2007, 1, 1).date()
+        except Exception:
+            dob_default = datetime(2007, 1, 1).date()
+        dob = c1.date_input("Date of Birth *", value=dob_default)
+
+        old_blood = _clean_smart_card_value((existing or {}).get("Blood_Group"))
+        blood_index = groups.index(old_blood) if old_blood in groups else 0
+        blood = c2.selectbox("Blood Group *", groups, index=blood_index)
+
+        address = st.text_area(
+            "Full Address *",
+            value=_clean_smart_card_value((existing or {}).get("Address")),
+            height=110,
+            placeholder="House / Building, Street, Place, District, State",
+        )
+
+        c1, c2 = st.columns(2)
+        pin = c1.text_input(
+            "PIN Code *",
+            value=_clean_smart_card_value((existing or {}).get("PIN_Code")),
+            max_chars=6,
+        )
+        college = c2.text_input(
+            "Studied College *",
+            value=_clean_smart_card_value((existing or {}).get("Studied_College")),
+        )
+
+        c1, c2 = st.columns(2)
+        department = c1.text_input(
+            "Department",
+            value=_clean_smart_card_value(reg.get("Department")),
+            disabled=True,
+        )
+        semester = c2.text_input(
+            "Semester",
+            value=_clean_smart_card_value(reg.get("Semester")),
+            disabled=True,
+        )
+
+        c1, c2 = st.columns(2)
+        cgpa = c1.text_input(
+            "CGPA (optional)",
+            value=_clean_smart_card_value((existing or {}).get("CGPA")),
+        )
+        university = c2.text_input(
+            "University Name *",
+            value=_clean_smart_card_value((existing or {}).get("University_Name"))
+            or "APJ Abdul Kalam Technological University",
+        )
+
+        submit = st.form_submit_button(
+            "💾 Save / Update Smart Card",
+            type="primary",
+            use_container_width=True,
+        )
+
     if submit:
-        if not all([registration_id.strip(),name.strip(),address.strip(),pin.strip(),college.strip(),university.strip()]):
-            st.error("Please fill all required fields marked *."); return
-        if cgpa.strip():
+        registration_id = registration_id.strip()
+        name = name.strip()
+        address = address.strip()
+        pin = pin.strip()
+        college = college.strip()
+        university = university.strip()
+        cgpa = cgpa.strip()
+
+        if not all([registration_id, name, address, pin, college, university]):
+            st.error("Please fill all required fields marked with *.")
+            return
+
+        if not pin.isdigit() or len(pin) != 6:
+            st.error("PIN Code must contain exactly 6 digits.")
+            return
+
+        if cgpa:
             try:
-                if not 0 <= float(cgpa.strip()) <= 10: raise ValueError
+                cgpa_value = float(cgpa)
+                if not 0 <= cgpa_value <= 10:
+                    raise ValueError
+                cgpa = f"{cgpa_value:.2f}".rstrip("0").rstrip(".")
             except Exception:
-                st.error("CGPA must be a number from 0 to 10."); return
-        data={"Registration_ID":registration_id.strip(),"University_ID":uid.strip(),"Student_Name":name.strip(),"DOB":dob.strftime("%Y-%m-%d"),"Blood_Group":blood,"Address":address.strip(),"PIN_Code":pin.strip(),"Studied_College":college.strip(),"Department":department,"Semester":semester,"CGPA":cgpa.strip(),"University_Name":university.strip()}
-        row=save_smart_card_registration(data)
-        st.session_state.smart_card_registration=row; st.session_state.smart_card_hidden=False
-        audit("Smart Card Registration","Student","",uid,department,semester,"Full smart card details submitted/updated")
-        st.success("✅ Smart Card saved successfully. Your full card is shown below.")
-    card_data=st.session_state.get("smart_card_registration") or existing
-    if card_data and not st.session_state.get("smart_card_hidden",False):
-        details=[("DOB",card_data.get("DOB","")),("Blood Group",card_data.get("Blood_Group","")),("University ID",card_data.get("University_ID","")),("PIN Code",card_data.get("PIN_Code","")),("Department",card_data.get("Department","")),("Semester",card_data.get("Semester","")),("Studied College",card_data.get("Studied_College","")),("University",card_data.get("University_Name","")),("CGPA",card_data.get("CGPA","") or "—"),("Address",card_data.get("Address",""))]
-        html=f"<div class='smart-card'><div class='small'>EduPredict SPP • Student Identity Card</div><div class='name'>{card_data.get('Student_Name','')}</div><div class='uid'>{card_data.get('Registration_ID','')}</div><div class='detail-grid'>"
-        for label,val in details:
-            html += f"<div><div class='label'>{label}</div><div class='value'>{str(val)}</div></div>"
+                st.error("CGPA must be a number from 0 to 10.")
+                return
+
+        data = {
+            "Registration_ID": registration_id,
+            "University_ID": uid,
+            "Student_Name": name,
+            "DOB": dob.strftime("%Y-%m-%d"),
+            "Blood_Group": blood,
+            "Address": address,
+            "PIN_Code": pin,
+            "Studied_College": college,
+            "Department": department,
+            "Semester": semester,
+            "CGPA": cgpa,
+            "University_Name": university,
+        }
+
+        try:
+            row = save_smart_card_registration(data)
+            st.session_state.smart_card_registration = row
+            st.session_state.smart_card_hidden = False
+            audit(
+                "Smart Card Registration",
+                "Student",
+                "",
+                uid,
+                department,
+                semester,
+                "Full Smart Card details submitted/updated",
+            )
+            st.success("✅ Smart Card saved successfully.")
+        except Exception as exc:
+            st.error(f"Smart Card could not be saved: {exc}")
+            return
+
+    card_data = st.session_state.get("smart_card_registration") or find_smart_card_registration(uid)
+
+    if card_data and not st.session_state.get("smart_card_hidden", False):
+        details = [
+            ("Date of Birth", card_data.get("DOB", "—")),
+            ("Blood Group", card_data.get("Blood_Group", "—")),
+            ("University ID", card_data.get("University_ID", "—")),
+            ("PIN Code", card_data.get("PIN_Code", "—")),
+            ("Department", card_data.get("Department", "—")),
+            ("Semester", card_data.get("Semester", "—")),
+            ("Studied College", card_data.get("Studied_College", "—")),
+            ("University", card_data.get("University_Name", "—")),
+            ("CGPA", card_data.get("CGPA", "—") or "—"),
+            ("Address", card_data.get("Address", "—")),
+        ]
+
+        # Escape values before inserting them into HTML.
+        from html import escape
+        html = (
+            "<div class='smart-card'>"
+            "<div class='small'>EduPredict SPP • STUDENT SMART CARD</div>"
+            f"<div class='name'>{escape(str(card_data.get('Student_Name', 'Student')))}</div>"
+            f"<div class='uid'>{escape(str(card_data.get('Registration_ID', uid)))}</div>"
+            "<div class='detail-grid'>"
+        )
+        for label, value in details:
+            html += (
+                "<div><div class='label'>"
+                + escape(str(label))
+                + "</div><div class='value'>"
+                + escape(str(value or "—"))
+                + "</div></div>"
+            )
         html += "</div></div>"
-        st.markdown(html,unsafe_allow_html=True)
-        card=create_student_card_png(card_data)
-        if card: st.download_button("📥 Download Full Smart Card PNG",card,f"{uid}_Smart_Card.png","image/png",type="primary",use_container_width=True)
-    if st.button("← Back to Student Dashboard" if st.session_state.get("logged_in") else "← Back to Home"):
-        st.session_state.page="student_dashboard" if st.session_state.get("logged_in") and st.session_state.get("role")=="student" else "home"; st.rerun()
+        st.markdown(html, unsafe_allow_html=True)
+
+        card = create_student_card_png(card_data)
+        if card:
+            st.download_button(
+                "📥 Download Full Smart Card PNG",
+                card,
+                f"{re.sub(r'[^A-Za-z0-9_-]', '_', uid)}_Smart_Card.png",
+                "image/png",
+                type="primary",
+                use_container_width=True,
+            )
+
+    if st.button(
+        "← Back to Student Dashboard" if st.session_state.get("logged_in") else "← Back to Home",
+        use_container_width=True,
+    ):
+        st.session_state.page = (
+            "student_dashboard"
+            if st.session_state.get("logged_in") and st.session_state.get("role") == "student"
+            else "home"
+        )
+        st.rerun()
 
 # ============================================================
 # K-MEANS TUTOR ANALYSIS
