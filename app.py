@@ -469,12 +469,71 @@ def upsert_report(report):
     sync_marks_to_supabase(report)
 
 
-def delete_student(uid, department):
+def delete_student(uid, department, semester="", tutor_username=""):
+    """Delete the selected student's local registration + marks and shared records.
+    This is intentionally keyed by the selected University ID, with department/semester
+    used as additional filters where applicable.
+    """
+    uid = str(uid).strip()
+    department = str(department).strip()
+    semester = str(semester).strip().upper()
+
+    # Delete local marks/report for the selected student.
     df = load_reports()
-    if df.empty:
-        return
-    mask = df["University_ID"].astype(str).eq(str(uid)) & df["Department"].astype(str).eq(str(department))
-    save_reports(df.loc[~mask].copy())
+    if not df.empty:
+        mask = df["University_ID"].astype(str).eq(uid)
+        if department:
+            mask &= df["Department"].astype(str).eq(department)
+        if semester:
+            mask &= df["Semester"].astype(str).str.upper().eq(semester)
+        save_reports(df.loc[~mask].copy())
+
+    # Delete local student registration/details.
+    reg = load_registrations()
+    if not reg.empty:
+        rmask = reg["University_ID"].astype(str).eq(uid)
+        if department:
+            rmask &= reg["Department"].astype(str).eq(department)
+        if semester:
+            rmask &= reg["Semester"].astype(str).str.upper().eq(semester)
+        save_registrations(reg.loc[~rmask].copy())
+
+    # Remove the shared student/marks/card records so Principal no longer sees
+    # the deleted student's details. Failures are swallowed so a temporary
+    # Supabase issue does not crash the Tutor + Student application.
+    try:
+        sb = _get_shared_supabase()
+        if sb is not None:
+            sb.table("student_marks").delete().eq("university_id", uid).execute()
+            sb.table("students").delete().eq("university_id", uid).execute()
+            # Smart Card belongs to the same student; remove it with the student.
+            sb.table("smart_cards").delete().eq("university_id", uid).execute()
+    except Exception:
+        pass
+
+    # Remove locally stored profile files for this student when possible.
+    try:
+        files = get_student_files(uid)
+        for path in files:
+            try:
+                if os.path.isfile(path):
+                    os.remove(path)
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+    audit(
+        "Student Details + Marks Deleted",
+        "Tutor",
+        tutor_username or st.session_state.get("username", ""),
+        uid,
+        department,
+        semester,
+        "Selected student registration, marks and linked records deleted by tutor."
+    )
+
+
 
 
 def get_subjects(department, semester):
@@ -1854,8 +1913,15 @@ def teacher_dashboard():
             card=create_student_card_png(row)
             if card:
                 c2.download_button("🪪 Download Student Card",card,f"{selected}_Student_Card.png","image/png",use_container_width=True)
-            if c3.button("🗑️ Delete Marks",use_container_width=True):
-                delete_student(selected,department); st.success("Marks deleted."); st.rerun()
+            if c3.button("🗑️ Delete Selected Student", use_container_width=True, type="secondary"):
+                delete_student(
+                    selected,
+                    department,
+                    semester,
+                    st.session_state.get("username", "")
+                )
+                st.success(f"✅ Student {selected} details and marks were deleted.")
+                st.rerun()
     with tabs[4]:
         st.subheader(f"📈 K-Means Analysis — {department} — {semester}")
         result=kmeans_analysis(department)
