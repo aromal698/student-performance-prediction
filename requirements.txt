@@ -2,5 +2,6 @@ streamlit
 pandas
 numpy
 scikit-learn
-joblib
 reportlab
+Pillow
+supabase
