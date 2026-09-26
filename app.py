@@ -230,6 +230,8 @@ DEFAULT_STATE = {
     "tutor_account_email": "",
     "tutor_wallet_balance": 0.0,
     "show_tutor_create": False,
+    "teacher_name": "", "teacher_semester": "S3", "active_department": None,
+    "teacher_menu_view": "menu",
 }
 for key, value in DEFAULT_STATE.items():
     if key not in st.session_state:
@@ -855,8 +857,10 @@ def get_tutor_profile(username):
 def get_current_tutor_name():
     """Single source of truth for the displayed tutor name."""
     username = str(st.session_state.get("username") or "").strip()
-    profile = get_tutor_profile(username)
+    profile = get_tutor_profile(username) or {}
     name = str(profile.get("Tutor_Name") or st.session_state.get("teacher_name") or username or "Tutor").strip()
+    if not name:
+        name = "Tutor"
     st.session_state["teacher_name"] = name
     return name
 
@@ -1719,14 +1723,16 @@ def teacher_login():
     semester = "S3"
 
     # Resolve the real registered tutor name if one exists.
-    tutor_name = username
+    # Resolve tutor display name safely. Never use an undefined local name.
+    tutor_name = str(username or "Tutor").strip() or "Tutor"
     try:
         profile = get_tutor_profile(username) or {}
-        saved_name = str(profile.get("Tutor_Name", "")).strip()
-        if saved_name:
+        saved_name = str(profile.get("Tutor_Name") or "").strip()
+        if saved_name and not saved_name.lower().startswith("teacher_"):
             tutor_name = saved_name
     except Exception:
-        pass
+        # A missing/corrupt local profile must never block Tutor Login.
+        tutor_name = str(username or "Tutor").strip() or "Tutor"
 
     st.session_state.logged_in = True
     st.session_state.role = "teacher"
