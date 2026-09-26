@@ -1582,12 +1582,13 @@ def tutor_account_login_panel():
 
 
 def teacher_login():
-    """Normal Tutor Login. Kept completely separate from the salary account."""
+    """Normal Tutor Login. Salary account is completely separate."""
     if AUTOREFRESH_AVAILABLE:
         st_autorefresh(interval=60_000, key="teacher_login_minute_refresh")
+
     login_shell("Tutor Login", "Use your Tutor Username and Password")
 
-    # Circle icon: account creation / salary-account access only.
+    # Salary-account shortcut. This never logs into the Tutor Dashboard.
     st.markdown("""<style>
     div[data-testid="stButton"] > button.tutor-account-circle{
         border-radius:50%!important;width:58px!important;height:58px!important;
@@ -1597,8 +1598,8 @@ def teacher_login():
         box-shadow:0 8px 28px rgba(0,0,0,.35)!important;
     }
     </style>""", unsafe_allow_html=True)
-    circle = st.button("👤", key="tutor_account_circle", help="Tutor Salary Account")
-    if circle:
+
+    if st.button("👤", key="tutor_account_circle", help="Tutor Salary Account"):
         st.session_state.show_tutor_create = not st.session_state.get("show_tutor_create", False)
         st.rerun()
 
@@ -1611,38 +1612,76 @@ def teacher_login():
         st.divider()
         st.markdown("### 🔐 Normal Tutor Login")
 
-    # IMPORTANT: this login is independent of the salary email account.
     with st.form("teacher_login_form"):
-        username = st.text_input("👨‍🏫 Tutor Username", placeholder="e.g. teacher_ce")
-        password = st.text_input("🔑 Tutor Password", type="password", placeholder="Enter tutor password")
+        username_input = st.text_input(
+            "👨‍🏫 Tutor Username",
+            placeholder="e.g. teacher_ce",
+            key="tutor_login_username",
+        )
+        password_input = st.text_input(
+            "🔑 Tutor Password",
+            type="password",
+            placeholder="Enter tutor password",
+            key="tutor_login_password",
+        )
         c1, c2 = st.columns(2)
         login = c1.form_submit_button("🔐 Tutor Login", use_container_width=True, type="primary")
         back = c2.form_submit_button("← Back", use_container_width=True)
+
     if back:
         st.session_state.page = "home"
         st.rerun()
-    if login:
-        username = username.strip()
-        account = TEACHERS.get(username)
-        if not account or account.get("password") != password:
-            st.error("Invalid Tutor Username or Password.")
-            return
 
-        st.session_state.logged_in = True
-        st.session_state.role = "teacher"
-        st.session_state.username = username
-        st.session_state.tutor_account_email = ""
-        st.session_state.teacher_department = account["department"]
-        st.session_state.teacher_semester = "S3"
-        st.session_state.active_department = account["department"]
-        st.session_state.teacher_menu_view = "menu"
-        log_action(
-            "Tutor", username, "Tutor Login", "", account["department"], "S3",
-            "Successful normal tutor login; salary account remains separate"
-        )
-        st.session_state.show_tutor_create = False
-        st.session_state.page = "teacher_dashboard"
-        st.rerun()
+    if not login:
+        return
+
+    # Normalize the username so accidental spaces/case do not cause a name/login error.
+    entered_username = str(username_input or "").strip()
+    password = str(password_input or "")
+    matched_username = next(
+        (key for key in TEACHERS if key.strip().lower() == entered_username.lower()),
+        None,
+    )
+    account = TEACHERS.get(matched_username) if matched_username else None
+
+    if account is None or str(account.get("password", "")) != password:
+        st.error("❌ Invalid Tutor Username or Password.")
+        st.info("Example: **teacher_ce** / **ktutech**")
+        return
+
+    # Always use the canonical login username from TEACHERS.
+    username = matched_username
+    department = str(account.get("department", "")).strip()
+    semester = "S3"
+
+    # Resolve the real registered tutor name if one exists.
+    tutor_name = username
+    try:
+        profile = get_tutor_profile(username) or {}
+        saved_name = str(profile.get("Tutor_Name", "")).strip()
+        if saved_name:
+            tutor_name = saved_name
+    except Exception:
+        pass
+
+    st.session_state.logged_in = True
+    st.session_state.role = "teacher"
+    st.session_state.username = username
+    st.session_state.tutor_account_email = ""
+    st.session_state.teacher_name = tutor_name
+    st.session_state.teacher_department = department
+    st.session_state.teacher_semester = semester
+    st.session_state.active_department = department
+    st.session_state.teacher_menu_view = "menu"
+
+    log_action(
+        "Tutor", username, "Tutor Login", "", department, semester,
+        f"Successful tutor login; Tutor={tutor_name}; salary account remains separate"
+    )
+
+    st.session_state.show_tutor_create = False
+    st.session_state.page = "teacher_dashboard"
+    st.rerun()
 
 def student_login():
     if AUTOREFRESH_AVAILABLE:
