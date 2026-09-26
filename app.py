@@ -7,6 +7,7 @@ import json
 import re
 import base64
 from pathlib import Path
+from html import escape
 from datetime import datetime
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
@@ -348,18 +349,14 @@ def inject_css():
     .smart-card .value {{ color:#fff; font-weight:700; word-break:break-word; }}
     @keyframes cardshine {{ from{{transform:translate3d(-25%,-10%,0) rotate(0deg)}} to{{transform:translate3d(25%,10%,0) rotate(360deg)}} }}
     @keyframes pop {{ from{{transform:scale(.82);opacity:0}} to{{transform:scale(1);opacity:1}} }}
-    /* EASY / FRIENDLY USER INTERFACE */
-    .ux-card { padding:22px; border-radius:22px; background:rgba(8,25,60,.72); border:1px solid rgba(125,211,252,.16); box-shadow:0 14px 45px rgba(0,0,0,.18); margin:8px 0 14px; }
-    .ux-title { font-size:1.35rem; font-weight:800; margin-bottom:5px; }
-    .ux-sub { color:#b8c7df; font-size:.92rem; line-height:1.5; }
-    .step-card { min-height:135px; padding:18px; border-radius:20px; background:linear-gradient(145deg,rgba(15,45,95,.82),rgba(7,24,58,.74)); border:1px solid rgba(125,211,252,.16); }
-    .step-no { width:38px;height:38px;border-radius:50%;display:grid;place-items:center;background:linear-gradient(135deg,#38bdf8,#2563eb);font-weight:900;margin-bottom:10px; }
-    .quick-bar { padding:12px 16px; border-radius:16px; background:rgba(2,15,40,.70); border:1px solid rgba(125,211,252,.14); margin:10px 0 18px; }
-    .stButton>button { min-height:46px; border-radius:13px !important; font-weight:700 !important; }
-    div[data-testid="stTextInput"] input, div[data-testid="stNumberInput"] input { border-radius:12px !important; }
-    div[data-testid="stSelectbox"] > div { border-radius:12px !important; }
-    .stTabs [data-baseweb="tab"] { font-weight:700; padding-left:14px; padding-right:14px; }
-    .help-box { padding:15px 18px; border-radius:16px; background:rgba(14,116,144,.12); border:1px solid rgba(56,189,248,.20); color:#dbeafe; }
+    /* Friendly Tutor + Student portal controls */
+    .portal-strip{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:16px 18px;margin:8px 0 16px;border:1px solid rgba(125,211,252,.16);border-radius:20px;background:rgba(15,23,42,.62);backdrop-filter:blur(14px);}
+    .portal-strip .portal-title{font-size:1.35rem;font-weight:850;color:#f8fafc;}
+    .portal-strip .portal-sub{font-size:.84rem;color:#9fb0c8;margin-top:3px;}
+    .friendly-note{padding:11px 14px;margin:8px 0 14px;border-left:3px solid #38bdf8;border-radius:10px;background:rgba(14,165,233,.08);color:#dbeafe;}
+    .quick-action{padding:15px;border-radius:18px;border:1px solid rgba(255,255,255,.10);background:rgba(15,23,42,.55);}
+    .quick-action b{font-size:1rem;} .quick-action span{display:block;color:#9fb0c8;font-size:.8rem;margin-top:3px;}
+    div[data-testid="stRadio"] label{border:1px solid rgba(255,255,255,.10);border-radius:13px;padding:7px 11px;background:rgba(15,23,42,.50);}
     @media (prefers-reduced-motion: reduce) {{ .stApp::before,.stApp::after,.login-grid,.login-orb,.login-main-emoji,.dynamic-3d-wallpaper * {{ animation:none !important; }} }}
     </style>
     """, unsafe_allow_html=True)
@@ -458,7 +455,7 @@ def sync_marks_to_supabase(report):
             return
         uid = str(report.get("University_ID", "")).strip()
         subjects = parse_subjects(report.get("Subjects_JSON", "[]"))
-        tutor_name = get_current_tutor_name()
+        tutor_name = str(st.session_state.get("username", "")).strip()
         sb.table("student_marks").delete().eq("university_id", uid).execute()
         sb.table("student_marks").insert({
             "university_id": uid,
@@ -1026,7 +1023,12 @@ def find_smart_card_registration(uid):
 def hide_smart_card(): st.session_state.smart_card_hidden=True
 
 def log_action(action, role, username="", uid="", department="", semester="", details=""):
-    """Compatibility wrapper for older Tutor activity calls."""
+    """Backward-compatible alias used by the Tutor Login and activity logger.
+
+    Older versions called log_action while the current app stores all activity
+    through audit(). Keeping this wrapper prevents a NameError and ensures the
+    same event is written to both local CSV and Supabase.
+    """
     return audit(action, role, username, uid, department, semester, details)
 
 
@@ -1534,59 +1536,69 @@ def minute_visual():
 
 
 def home_page():
-    """Simple student/tutor entry page designed for first-time users."""
+    if AUTOREFRESH_AVAILABLE:
+        st_autorefresh(interval=60_000, key="home_page_minute_refresh")
     app_brand()
-    st.markdown("""
+    visual = minute_visual()
+    st.markdown(f"""
     <div class="hero">
+      <div class="login-grid"></div><div class="login-orb one"></div><div class="login-orb two"></div>
       <div style="position:relative;z-index:2">
-        <div style="font-size:3rem">🎓</div>
-        <div class="minute-badge">KTU B.Tech • Student Performance Portal</div>
-        <h1>EduPredict SPP</h1>
-        <p>One simple place for Tutor work, Student results, Smart Cards and academic records.</p>
+        <div class="login-main-emoji">{visual}</div>
+        <div class="minute-badge">Live visual • changes every minute</div>
+        <h1>Student Performance Prediction</h1>
+        <p>KTU B.Tech student registration, marks, performance analysis and smart student card.</p>
       </div>
     </div>
     """, unsafe_allow_html=True)
-
-    st.markdown("### 👋 What do you want to do?")
+    st.write("")
     a,b,c=st.columns(3)
-    with a:
-        st.markdown('<div class="step-card"><div class="step-no">1</div><div class="ux-title">👨‍🏫 Tutor</div><div class="ux-sub">Register students, enter marks, upload files and view records.</div></div>',unsafe_allow_html=True)
-        if st.button("Open Tutor Login →",key="home_tutor",use_container_width=True,type="primary"):
-            st.session_state.page="teacher_login"; st.rerun()
-    with b:
-        st.markdown('<div class="step-card"><div class="step-no">2</div><div class="ux-title">🎓 Student</div><div class="ux-sub">Open your profile, calculate your result and check earned credits.</div></div>',unsafe_allow_html=True)
-        if st.button("Open Student →",key="home_student",use_container_width=True):
-            st.session_state.page="student_login"; st.rerun()
-    with c:
-        st.markdown('<div class="step-card"><div class="step-no">3</div><div class="ux-title">🪪 Smart Card</div><div class="ux-sub">Create or view your colorful student Smart Card separately.</div></div>',unsafe_allow_html=True)
-        if st.button("Create Smart Card →",key="home_card",use_container_width=True):
-            st.session_state.page="smart_card"; st.rerun()
+    if a.button("👨‍🏫 Tutor Login",use_container_width=True,type="primary"):
+        st.session_state.page="teacher_login"; st.rerun()
+    if b.button("🎓 Student Login",use_container_width=True):
+        st.session_state.page="student_login"; st.rerun()
+    if c.button("🪪 Student Smart Card (Self Registration)",use_container_width=True):
+        st.session_state.page="smart_card"; st.rerun()
 
-    st.markdown("### 🔎 Quick Student Visit")
-    st.markdown('<div class="help-box">No tutor marks are required. Enter the registered University ID and Student Name to view the basic profile.</div>',unsafe_allow_html=True)
+    st.markdown("### 👤 Student Profile — Quick Visit")
+    st.caption("Enter your University ID + Student Name to view your registered profile directly. Tutor marks are NOT required.")
     with st.form("home_student_profile_lookup"):
-        h1,h2=st.columns(2)
-        home_uid=h1.text_input("🪪 University ID",placeholder="e.g. KTU25CE001")
-        home_name=h2.text_input("👤 Student Name",placeholder="Enter your registered name")
-        view_profile=st.form_submit_button("🔎 View My Profile",type="primary",use_container_width=True)
+        h1, h2 = st.columns(2)
+        home_uid = h1.text_input("🪪 University ID", placeholder="e.g. SNM25CE001")
+        home_name = h2.text_input("👤 Student Name", placeholder="Enter your registered name")
+        view_profile = st.form_submit_button("🔎 View My Profile", type="primary", use_container_width=True)
     if view_profile:
         if not home_uid.strip() or not home_name.strip():
             st.error("Please enter both University ID and Student Name.")
         else:
-            prof=find_student(home_name.strip(),home_uid.strip())
+            prof = find_student(home_name.strip(), home_uid.strip())
             if prof:
-                st.success("✅ Profile found")
-                p1,p2,p3=st.columns(3)
-                p1.metric("Student",prof.get("Student_Name","")); p2.metric("University ID",prof.get("University_ID","")); p3.metric("Semester",prof.get("Semester",""))
-                st.write(f"**Department:** {prof.get('Department','')}  •  **College:** {prof.get('Studied_College','')}")
+                st.success("✅ Profile found. No tutor marks are required to view this profile.")
+                p1,p2,p3,p4 = st.columns(4)
+                p1.metric("👤 Name", prof.get("Student_Name", "—"))
+                p2.metric("🪪 University ID", prof.get("University_ID", "—"))
+                p3.metric("🏫 Department", prof.get("Department", "—"))
+                p4.metric("📚 Semester", prof.get("Semester", "—"))
+                st.write(f"**Studied College:** {prof.get('Studied_College', '—')}")
+                st.write(f"**Registered At:** {prof.get('Registered_Time', '—')}")
             else:
                 st.error("Profile not found. Check the University ID and Student Name.")
 
-    st.markdown("### 🧭 How it works")
-    x,y,z=st.columns(3)
-    x.markdown('<div class="ux-card"><div class="ux-title">1️⃣ Tutor enters data</div><div class="ux-sub">Student registration → Mark Entry → Complete submission.</div></div>',unsafe_allow_html=True)
-    y.markdown('<div class="ux-card"><div class="ux-title">2️⃣ Result is calculated</div><div class="ux-sub">Scores, pass/fail status, performance and credits are calculated automatically.</div></div>',unsafe_allow_html=True)
-    z.markdown('<div class="ux-card"><div class="ux-title">3️⃣ Student checks result</div><div class="ux-sub">Student can view profile, result, credits, improvement tips and reports.</div></div>',unsafe_allow_html=True)
+
+def login_shell(title, subtitle):
+    app_brand()
+    visual = minute_visual()
+    st.markdown(f"""
+    <div class="login-wrap">
+      <div class="login-grid"></div><div class="login-orb one"></div><div class="login-orb two"></div>
+      <div style="width:min(560px,90%);position:relative;z-index:2;text-align:center">
+        <div class="login-main-emoji">{visual}</div>
+        <div class="minute-badge">Visual changes every minute</div>
+        <h1>{title}</h1><p style="color:#94a3b8">{subtitle}</p>
+      </div>
+    </div>
+    """, unsafe_allow_html=True)
+
 
 def tutor_create_account_panel():
     st.markdown("### 🆕 Create Tutor Account")
@@ -2271,11 +2283,11 @@ def tutor_profile_tab():
 def teacher_dashboard():
     app_brand()
     assigned_department = st.session_state.get("teacher_department") or DEPARTMENTS[0]
-    st.title("👨‍🏫 Tutor Workspace")
     tutor_profile=get_tutor_profile(st.session_state.username)
     tutor_display=get_current_tutor_name()
-    st.markdown(f'<div class="quick-bar">👨‍🏫 <b>{tutor_display}</b> &nbsp;•&nbsp; 🎓 <b>{assigned_department}</b> &nbsp;•&nbsp; 📚 <b>S3</b></div>',unsafe_allow_html=True)
-    st.markdown('<div class="help-box">💡 <b>Simple workflow:</b> 1. Register student → 2. Enter marks → 3. Complete submission → 4. Check Records. Salary account is separate and is opened from the 👤 icon on Tutor Login.</div>',unsafe_allow_html=True)
+    st.markdown(f'<div class="portal-strip"><div><div class="portal-title">👨‍🏫 Tutor Portal</div><div class="portal-sub">Welcome, {escape(str(tutor_display))} • {escape(str(assigned_department))}</div></div><div style="font-size:2rem">🎓</div></div>',unsafe_allow_html=True)
+    st.markdown("<div class='friendly-note'>💡 <b>Easy workflow:</b> Register students → Enter marks → Upload files → Check records & analysis.</div>",unsafe_allow_html=True)
+    st.caption("💳 Salary Account is separate. Open it from the 👤 account icon on the Tutor Login page.")
     c1,c2,c3 = st.columns([2.2,1.0,0.8])
     department = c1.selectbox("🎓 B.Tech Department", DEPARTMENTS, index=DEPARTMENTS.index(assigned_department), key="dashboard_department")
     default_sem=str(st.session_state.get("teacher_semester","S3")).upper(); sem_index=SEMESTERS.index(default_sem) if default_sem in SEMESTERS else 2
@@ -2287,11 +2299,20 @@ def teacher_dashboard():
         st.error(f"No complete 6-subject mapping is configured for **{department} — {semester}**.")
         return
     st.success(f"📖 Active curriculum: **{department} — {semester}**")
-    tabs = st.tabs(["📝 1. Register","📊 2. Enter Marks","📎 3. Files","👥 4. Records","📈 5. Analysis","👨‍🏫 My Profile","🗑️ Delete Student"])
-    with tabs[0]: tutor_registration_form(department, semester)
-    with tabs[1]: tutor_mark_entry(department, semester)
-    with tabs[2]: tutor_student_files(department, semester)
-    with tabs[3]:
+    tutor_section = st.radio(
+        "Tutor section",
+        ["📝 Registration", "📊 Mark Entry", "📎 Student Files", "👥 Records", "📈 K-Means", "👨‍🏫 Tutor Profile", "🗑️ Delete Student"],
+        horizontal=True,
+        key="tutor_section_navigation",
+        label_visibility="collapsed",
+    )
+    if tutor_section == "📝 Registration":
+        tutor_registration_form(department, semester)
+    elif tutor_section == "📊 Mark Entry":
+        tutor_mark_entry(department, semester)
+    elif tutor_section == "📎 Student Files":
+        tutor_student_files(department, semester)
+    elif tutor_section == "👥 Records":
         df = load_reports()
         filtered = df[(df["Department"].astype(str)==str(department)) & (df["Semester"].astype(str).str.upper()==str(semester).upper())].copy()
         st.subheader(f"Student Records — {department} — {semester} ({len(filtered)})")
@@ -2313,7 +2334,7 @@ def teacher_dashboard():
             card=create_student_card_png(row)
             if card:
                 c2.download_button("🪪 Download Student Card",card,f"{selected}_Student_Card.png","image/png",use_container_width=True)
-    with tabs[4]:
+    elif tutor_section == "📈 K-Means":
         st.subheader(f"📈 K-Means Analysis — {department} — {semester}")
         result=kmeans_analysis(department)
         if not result.get("available"):
@@ -2328,8 +2349,9 @@ def teacher_dashboard():
             st.dataframe(pd.DataFrame(result["summary"]),use_container_width=True,hide_index=True)
             st.dataframe(pd.DataFrame(result["centroids"]),use_container_width=True,hide_index=True)
             st.download_button("📊 Download K-Means Analysis PDF",create_kmeans_pdf(result),f"{department.replace(' ','_')}_KMeans_Analysis.pdf","application/pdf",use_container_width=True,type="primary")
-    with tabs[5]: tutor_profile_tab()
-    with tabs[6]:
+    elif tutor_section == "👨‍🏫 Tutor Profile":
+        tutor_profile_tab()
+    elif tutor_section == "🗑️ Delete Student":
         st.subheader("🗑️ Delete Registered Student")
         st.warning("This is the separate student-deletion page. Select ONE student, then delete that student's complete details. This action removes registration, marks, Smart Card and linked files.")
         reg = load_registrations()
@@ -2367,9 +2389,8 @@ def student_dashboard():
         x=reports[reports["University_ID"].astype(str).str.lower().eq(str(uid).lower())]
         if not x.empty: report=x.iloc[0].to_dict()
     profile=reg or student
-    st.title(f"🎓 Welcome, {profile.get('Student_Name','Student')}")
-    st.markdown('<div class="help-box">💡 <b>Student guide:</b> Check your profile first. If marks are available, enter your total daily study hours once and press <b>Calculate My Result</b>.</div>',unsafe_allow_html=True)
-    st.caption(f"University ID: {uid}  •  {profile.get('Semester','')}  •  {profile.get('Department','')}")
+    st.markdown(f'<div class="portal-strip"><div><div class="portal-title">🎓 Student Portal</div><div class="portal-sub">Welcome, {escape(str(profile.get("Student_Name","Student")))} • University ID: {escape(str(uid))}</div></div><div style="font-size:2rem">📚</div></div>',unsafe_allow_html=True)
+    st.markdown("<div class='friendly-note'>💡 Use the buttons below for your Smart Card or logout. Your profile, tutor files and performance result are shown in simple sections.</div>",unsafe_allow_html=True)
     c1,c2=st.columns(2)
     if c1.button("🪪 Student Smart Card (Self Registration)",use_container_width=True,type="primary"):
         st.session_state.smart_card_registration=find_smart_card_registration(uid); st.session_state.smart_card_hidden=False; st.session_state.page="smart_card"; st.rerun()
@@ -2454,28 +2475,6 @@ def student_dashboard():
         card=create_student_card_png(profile)
         if card: c2.download_button("🪪 Download Smart Card PNG",card,f"{uid}_Smart_Card.png","image/png",use_container_width=True)
 
-
-def main():
-    """Run the Tutor + Student Streamlit application."""
-    if st.session_state.page == "home":
-        home_page()
-    elif st.session_state.page == "teacher_login":
-        teacher_login()
-    elif st.session_state.page == "student_login":
-        student_login()
-    elif st.session_state.page == "smart_card":
-        smart_card_page()
-    elif st.session_state.page == "teacher_dashboard" and st.session_state.logged_in and st.session_state.role == "teacher":
-        teacher_dashboard()
-    elif st.session_state.page == "all_department_analysis" and st.session_state.logged_in and st.session_state.role == "teacher":
-        all_department_dashboard()
-    elif st.session_state.page == "student_dashboard" and st.session_state.logged_in and st.session_state.role == "student":
-        student_dashboard()
-    else:
-        st.session_state.page = "home"
-        st.rerun()
-
-
 # Clear obsolete widget keys from earlier versions if they exist.
 for _old_key in ("active_department", "manual_department_selector", "manual_semester_selector"):
     if _old_key in st.session_state:
@@ -2484,4 +2483,20 @@ for _old_key in ("active_department", "manual_department_selector", "manual_seme
 # ============================================================
 # ROUTER
 # ============================================================
-main()
+if st.session_state.page == "home":
+    home_page()
+elif st.session_state.page == "teacher_login":
+    teacher_login()
+elif st.session_state.page == "student_login":
+    student_login()
+elif st.session_state.page == "smart_card":
+    smart_card_page()
+elif st.session_state.page == "teacher_dashboard" and st.session_state.logged_in and st.session_state.role == "teacher":
+    teacher_dashboard()
+elif st.session_state.page == "all_department_analysis" and st.session_state.logged_in and st.session_state.role == "teacher":
+    all_department_dashboard()
+elif st.session_state.page == "student_dashboard" and st.session_state.logged_in and st.session_state.role == "student":
+    student_dashboard()
+else:
+    st.session_state.page = "home"
+    st.rerun()
