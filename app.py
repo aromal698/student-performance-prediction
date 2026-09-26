@@ -1674,8 +1674,8 @@ def teacher_login():
     st.session_state.active_department = department
     st.session_state.teacher_menu_view = "menu"
 
-    log_action(
-        "Tutor", username, "Tutor Login", "", department, semester,
+    audit(
+        "Tutor Login", "Tutor", username, "", department, semester,
         f"Successful tutor login; Tutor={tutor_name}; salary account remains separate"
     )
 
