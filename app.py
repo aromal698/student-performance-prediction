@@ -364,13 +364,13 @@ def inject_css():
     @keyframes cardshine {{ from{{transform:translate3d(-25%,-10%,0) rotate(0deg)}} to{{transform:translate3d(25%,10%,0) rotate(360deg)}} }}
     @keyframes pop {{ from{{transform:scale(.82);opacity:0}} to{{transform:scale(1);opacity:1}} }}
     /* Friendly Tutor + Student portal controls */
-    .portal-strip{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:16px 18px;margin:8px 0 16px;border:1px solid rgba(125,211,252,.16);border-radius:20px;background:rgba(15,23,42,.62);backdrop-filter:blur(14px);}
-    .portal-strip .portal-title{font-size:1.35rem;font-weight:850;color:#f8fafc;}
-    .portal-strip .portal-sub{font-size:.84rem;color:#9fb0c8;margin-top:3px;}
-    .friendly-note{padding:11px 14px;margin:8px 0 14px;border-left:3px solid #38bdf8;border-radius:10px;background:rgba(14,165,233,.08);color:#dbeafe;}
-    .quick-action{padding:15px;border-radius:18px;border:1px solid rgba(255,255,255,.10);background:rgba(15,23,42,.55);}
-    .quick-action b{font-size:1rem;} .quick-action span{display:block;color:#9fb0c8;font-size:.8rem;margin-top:3px;}
-    div[data-testid="stRadio"] label{border:1px solid rgba(255,255,255,.10);border-radius:13px;padding:7px 11px;background:rgba(15,23,42,.50);}
+    .portal-strip{{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:16px 18px;margin:8px 0 16px;border:1px solid rgba(125,211,252,.16);border-radius:20px;background:rgba(15,23,42,.62);backdrop-filter:blur(14px);}}
+    .portal-strip .portal-title{{font-size:1.35rem;font-weight:850;color:#f8fafc;}}
+    .portal-strip .portal-sub{{font-size:.84rem;color:#9fb0c8;margin-top:3px;}}
+    .friendly-note{{padding:11px 14px;margin:8px 0 14px;border-left:3px solid #38bdf8;border-radius:10px;background:rgba(14,165,233,.08);color:#dbeafe;}}
+    .quick-action{{padding:15px;border-radius:18px;border:1px solid rgba(255,255,255,.10);background:rgba(15,23,42,.55);}}
+    .quick-action b{{font-size:1rem;}} .quick-action span{{display:block;color:#9fb0c8;font-size:.8rem;margin-top:3px;}}
+    div[data-testid="stRadio"] label{{border:1px solid rgba(255,255,255,.10);border-radius:13px;padding:7px 11px;background:rgba(15,23,42,.50);}}
     @media (prefers-reduced-motion: reduce) {{ .stApp::before,.stApp::after,.login-grid,.login-orb,.login-main-emoji,.dynamic-3d-wallpaper * {{ animation:none !important; }} }}
     </style>
     """, unsafe_allow_html=True)
