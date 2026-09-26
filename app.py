@@ -722,8 +722,9 @@ def create_tutor_account(email, tutor_name, department, semester):
             er=list(getattr(existing,"data",None) or [])
             if er: return er[0],"This email already has a tutor account. Use the email to log in."
             row={"email":email,"tutor_id":email,"tutor_name":tutor_name.strip(),"department":department.strip(),"semester":semester.strip().upper(),"balance":0,"active":True}
+            # IMPORTANT: tutor_accounts is a separate salary account.
+            # Do NOT insert it into the tutors table; normal Tutor Login remains independent.
             sb.table("tutor_accounts").insert(row).execute()
-            sb.table("tutors").upsert({"tutor_id":email,"tutor_name":tutor_name.strip(),"department":department.strip(),"semester":semester.strip().upper(),"credit_score":0,"active":True},on_conflict="tutor_id").execute()
             return _save_tutor_account_local(email,tutor_name,department,semester,email),"created"
         local=load_tutor_accounts()
         if not local.empty and local["Email"].astype(str).str.lower().eq(email).any(): return local[local["Email"].astype(str).str.lower().eq(email)].iloc[0].to_dict(),"This email already has a tutor account."
@@ -1536,33 +1537,112 @@ def tutor_create_account_panel():
         else: st.error(message)
 
 
-def teacher_login():
-    if AUTOREFRESH_AVAILABLE: st_autorefresh(interval=60_000,key="teacher_login_minute_refresh")
-    login_shell("Tutor Login","Login with your one-time registered email account")
-    st.markdown("""<style>div[data-testid=\"stButton\"] > button.tutor-account-circle{border-radius:50%!important;width:58px!important;height:58px!important;padding:0!important;font-size:24px!important;position:fixed!important;right:28px!important;top:78px!important;z-index:9999!important;border:2px solid rgba(125,211,252,.75)!important;box-shadow:0 8px 28px rgba(0,0,0,.35)!important}</style>""",unsafe_allow_html=True)
-    circle=st.button("👤",key="tutor_account_circle",help="Create one-time tutor account")
-    if circle:
-        st.session_state.show_tutor_create=not st.session_state.get("show_tutor_create",False); st.rerun()
-    if st.session_state.get("show_tutor_create",False):
-        tutor_create_account_panel(); st.divider(); st.markdown("### 🔐 Existing Tutor Account Login")
-    with st.form("teacher_login_form"):
-        email=st.text_input("📧 Tutor Email ID",value=st.session_state.get("tutor_account_email",""),placeholder="teacher_ceS3tutor@gmail.com")
-        c1,c2=st.columns(2); login=c1.form_submit_button("🔐 Login",use_container_width=True,type="primary"); back=c2.form_submit_button("← Back",use_container_width=True)
-    if back: st.session_state.page="home"; st.rerun()
-    if login:
-        email=_normalise_tutor_email(email); account=get_tutor_account(email)
-        if account:
-            st.session_state.logged_in=True; st.session_state.role="teacher"; st.session_state.username=email; st.session_state.tutor_account_email=email
-            st.session_state.teacher_department=str(account.get("department") or DEPARTMENTS[0]); st.session_state.teacher_semester=str(account.get("semester") or "S3").upper(); touch_tutor_account_login(email)
-            save_tutor_profile(email,str(account.get("tutor_name") or email),st.session_state.teacher_department,0.0)
-            audit("Tutor Login","Tutor",email,"",st.session_state.teacher_department,st.session_state.teacher_semester,f"Email account login; Tutor={account.get('tutor_name','')}")
-            st.session_state.show_tutor_create=False; st.session_state.page="teacher_dashboard"; st.rerun()
+def tutor_account_login_panel():
+    """Separate salary-account login. This NEVER logs the tutor into the Tutor dashboard."""
+    st.markdown("### 💳 Tutor Salary Account")
+    st.caption("This is separate from Tutor Login. Use the registered email only to view the salary wallet.")
+    with st.form("tutor_salary_account_login_form"):
+        email = st.text_input(
+            "📧 Salary Account Email",
+            placeholder="teacher_ceS3tutor@gmail.com",
+            key="salary_account_login_email",
+        )
+        open_account = st.form_submit_button(
+            "💳 Open Salary Account", type="primary", use_container_width=True
+        )
+    if open_account:
+        email = _normalise_tutor_email(email)
+        if not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", email):
+            st.error("Enter a valid email address.")
+            return
+        account = get_tutor_account(email)
+        if not account:
+            st.error("Salary account not found. Create the one-time account first using the 👤 button.")
+            return
+        wallet = get_tutor_wallet(email)
+        st.session_state["salary_account_view_email"] = email
+        st.session_state["salary_account_view"] = True
+        st.success(f"✅ Salary account opened for {account.get('tutor_name') or 'Tutor'}.")
+        st.metric("💰 Available Salary Balance", f"₹{float(wallet.get('balance') or 0):,.2f}")
+        tx = wallet.get("transactions") or []
+        if tx:
+            txdf = pd.DataFrame([
+                {
+                    "Date": x.get("sent_at", ""),
+                    "Month": x.get("salary_month", ""),
+                    "Amount": f"₹{float(x.get('amount') or 0):,.2f}",
+                    "Reference": x.get("reference", ""),
+                    "Status": x.get("status", "credited"),
+                }
+                for x in tx
+            ])
+            st.dataframe(txdf, use_container_width=True, hide_index=True)
         else:
-            old=TEACHERS.get(email)
-            if old:
-                st.session_state.logged_in=True; st.session_state.role="teacher"; st.session_state.username=email; st.session_state.teacher_department=old["department"]; st.session_state.teacher_semester="S3"; st.session_state.page="teacher_dashboard"; audit("Tutor Login","Tutor",email,"",old["department"],"S3","Legacy tutor login"); st.rerun()
-            else: st.error("Tutor account not found. Click the 👤 circle button and create the one-time account first.")
+            st.info("No salary has been credited to this account yet.")
 
+
+def teacher_login():
+    """Normal Tutor Login. Kept completely separate from the salary account."""
+    if AUTOREFRESH_AVAILABLE:
+        st_autorefresh(interval=60_000, key="teacher_login_minute_refresh")
+    login_shell("Tutor Login", "Use your Tutor Username and Password")
+
+    # Circle icon: account creation / salary-account access only.
+    st.markdown("""<style>
+    div[data-testid="stButton"] > button.tutor-account-circle{
+        border-radius:50%!important;width:58px!important;height:58px!important;
+        padding:0!important;font-size:24px!important;position:fixed!important;
+        right:28px!important;top:78px!important;z-index:9999!important;
+        border:2px solid rgba(125,211,252,.75)!important;
+        box-shadow:0 8px 28px rgba(0,0,0,.35)!important;
+    }
+    </style>""", unsafe_allow_html=True)
+    circle = st.button("👤", key="tutor_account_circle", help="Tutor Salary Account")
+    if circle:
+        st.session_state.show_tutor_create = not st.session_state.get("show_tutor_create", False)
+        st.rerun()
+
+    if st.session_state.get("show_tutor_create", False):
+        tab_create, tab_account = st.tabs(["🆕 Create Account", "💳 Account Login"])
+        with tab_create:
+            tutor_create_account_panel()
+        with tab_account:
+            tutor_account_login_panel()
+        st.divider()
+        st.markdown("### 🔐 Normal Tutor Login")
+
+    # IMPORTANT: this login is independent of the salary email account.
+    with st.form("teacher_login_form"):
+        username = st.text_input("👨‍🏫 Tutor Username", placeholder="e.g. teacher_ce")
+        password = st.text_input("🔑 Tutor Password", type="password", placeholder="Enter tutor password")
+        c1, c2 = st.columns(2)
+        login = c1.form_submit_button("🔐 Tutor Login", use_container_width=True, type="primary")
+        back = c2.form_submit_button("← Back", use_container_width=True)
+    if back:
+        st.session_state.page = "home"
+        st.rerun()
+    if login:
+        username = username.strip()
+        account = TEACHERS.get(username)
+        if not account or account.get("password") != password:
+            st.error("Invalid Tutor Username or Password.")
+            return
+
+        st.session_state.logged_in = True
+        st.session_state.role = "teacher"
+        st.session_state.username = username
+        st.session_state.tutor_account_email = ""
+        st.session_state.teacher_department = account["department"]
+        st.session_state.teacher_semester = "S3"
+        st.session_state.active_department = account["department"]
+        st.session_state.teacher_menu_view = "menu"
+        log_action(
+            "Tutor", username, "Tutor Login", "", account["department"], "S3",
+            "Successful normal tutor login; salary account remains separate"
+        )
+        st.session_state.show_tutor_create = False
+        st.session_state.page = "teacher_dashboard"
+        st.rerun()
 
 def student_login():
     if AUTOREFRESH_AVAILABLE:
@@ -2075,13 +2155,8 @@ def teacher_dashboard():
     st.title("👨‍🏫 Tutor Dashboard")
     tutor_profile=get_tutor_profile(st.session_state.username)
     tutor_display=tutor_profile.get("Tutor_Name") or st.session_state.username
-    wallet=get_tutor_wallet(st.session_state.get("tutor_account_email") or st.session_state.username)
     st.info(f"Tutor: **{tutor_display}**  •  Department: **{assigned_department}**")
-    st.metric("💳 Salary Account Balance",f"₹{float(wallet.get('balance',0)):,.2f}")
-    if wallet.get("transactions"):
-        with st.expander("💰 Salary Credit History"):
-            txdf=pd.DataFrame([{"Date":x.get("sent_at",""),"Month":x.get("salary_month",""),"Amount":f"₹{float(x.get('amount') or 0):,.2f}","Reference":x.get("reference","")} for x in wallet["transactions"]])
-            st.dataframe(txdf,use_container_width=True,hide_index=True)
+    st.caption("💳 Salary Account is separate. Open it from the 👤 account icon on the Tutor Login page.")
     c1,c2,c3 = st.columns([2.2,1.0,0.8])
     department = c1.selectbox("🎓 B.Tech Department", DEPARTMENTS, index=DEPARTMENTS.index(assigned_department), key="dashboard_department")
     default_sem=str(st.session_state.get("teacher_semester","S3")).upper(); sem_index=SEMESTERS.index(default_sem) if default_sem in SEMESTERS else 2
