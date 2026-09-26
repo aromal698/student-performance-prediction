@@ -7,6 +7,7 @@ import json
 import re
 import base64
 from pathlib import Path
+from html import escape
 from datetime import datetime
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
@@ -230,8 +231,6 @@ DEFAULT_STATE = {
     "tutor_account_email": "",
     "tutor_wallet_balance": 0.0,
     "show_tutor_create": False,
-    "teacher_name": "", "teacher_semester": "S3", "active_department": None,
-    "teacher_menu_view": "menu",
 }
 for key, value in DEFAULT_STATE.items():
     if key not in st.session_state:
@@ -857,10 +856,8 @@ def get_tutor_profile(username):
 def get_current_tutor_name():
     """Single source of truth for the displayed tutor name."""
     username = str(st.session_state.get("username") or "").strip()
-    profile = get_tutor_profile(username) or {}
+    profile = get_tutor_profile(username)
     name = str(profile.get("Tutor_Name") or st.session_state.get("teacher_name") or username or "Tutor").strip()
-    if not name:
-        name = "Tutor"
     st.session_state["teacher_name"] = name
     return name
 
@@ -1016,6 +1013,16 @@ def find_smart_card_registration(uid):
     return None
 
 def hide_smart_card(): st.session_state.smart_card_hidden=True
+
+def log_action(action, role, username="", uid="", department="", semester="", details=""):
+    """Backward-compatible alias used by the Tutor Login and activity logger.
+
+    Older versions called log_action while the current app stores all activity
+    through audit(). Keeping this wrapper prevents a NameError and ensures the
+    same event is written to both local CSV and Supabase.
+    """
+    return audit(action, role, username, uid, department, semester, details)
+
 
 def audit(action, role, username="", uid="", department="", semester="", details=""):
     df = _load_generic_csv(AUDIT_FILE, AUDIT_COLUMNS)
@@ -1723,16 +1730,14 @@ def teacher_login():
     semester = "S3"
 
     # Resolve the real registered tutor name if one exists.
-    # Resolve tutor display name safely. Never use an undefined local name.
-    tutor_name = str(username or "Tutor").strip() or "Tutor"
+    tutor_name = username
     try:
         profile = get_tutor_profile(username) or {}
-        saved_name = str(profile.get("Tutor_Name") or "").strip()
-        if saved_name and not saved_name.lower().startswith("teacher_"):
+        saved_name = str(profile.get("Tutor_Name", "")).strip()
+        if saved_name:
             tutor_name = saved_name
     except Exception:
-        # A missing/corrupt local profile must never block Tutor Login.
-        tutor_name = str(username or "Tutor").strip() or "Tutor"
+        pass
 
     st.session_state.logged_in = True
     st.session_state.role = "teacher"
