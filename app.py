@@ -55,6 +55,7 @@ os.makedirs(DATA_DIR, exist_ok=True)
 REPORT_FILE = os.path.join(DATA_DIR, "student_reports.csv")
 REGISTRATION_FILE = os.path.join(DATA_DIR, "student_registrations.csv")
 TUTOR_PROFILE_FILE = os.path.join(DATA_DIR, "tutor_profiles.csv")
+TUTOR_ACCOUNT_FILE = os.path.join(DATA_DIR, "tutor_accounts.csv")
 SMART_CARD_FILE = os.path.join(DATA_DIR, "smart_card_registrations.csv")
 AUDIT_FILE = os.path.join(DATA_DIR, "audit_log.csv")
 STUDENT_FILES_DIR = os.path.join(DATA_DIR, "student_files")
@@ -212,6 +213,7 @@ REPORT_COLUMNS = [
 ]
 REGISTRATION_COLUMNS = ["University_ID", "Student_Name", "Department", "Semester", "Tutor_Username", "Registered_Time"]
 TUTOR_PROFILE_COLUMNS = ["Tutor_Username", "Tutor_Name", "Department", "Credit_Score", "Updated_Time"]
+TUTOR_ACCOUNT_COLUMNS = ["Email", "Tutor_Name", "Department", "Semester", "Tutor_ID", "Created_Time", "Last_Login"]
 SMART_CARD_COLUMNS = ["Registration_ID", "University_ID", "Student_Name", "DOB", "Blood_Group", "Address", "PIN_Code", "Studied_College", "Department", "Semester", "CGPA", "University_Name", "Submitted_Time"]
 AUDIT_COLUMNS = ["Timestamp", "Role", "Username", "Action", "University_ID", "Department", "Semester", "Details"]
 
@@ -225,6 +227,9 @@ DEFAULT_STATE = {
     "student_registration": None,
     "smart_card_registration": None,
     "smart_card_hidden": False,
+    "tutor_account_email": "",
+    "tutor_wallet_balance": 0.0,
+    "show_tutor_create": False,
 }
 for key, value in DEFAULT_STATE.items():
     if key not in st.session_state:
@@ -463,7 +468,7 @@ def sync_tutor_profile_to_supabase(username, tutor_name, department, credit_scor
             "tutor_id": str(username).strip(),
             "tutor_name": str(tutor_name).strip(),
             "department": str(department).strip(),
-            "semester": "",
+            "semester": str(st.session_state.get("teacher_semester", "") or "").strip().upper(),
             "credit_score": float(credit_score or 0),
             "active": True,
         }, on_conflict="tutor_id").execute()
@@ -667,6 +672,90 @@ def find_registration(uid):
 
 def load_tutor_profiles():
     return _load_generic_csv(TUTOR_PROFILE_FILE, TUTOR_PROFILE_COLUMNS)
+
+
+def _normalise_tutor_email(email):
+    return str(email or "").strip().lower()
+
+
+def load_tutor_accounts():
+    return _load_generic_csv(TUTOR_ACCOUNT_FILE, TUTOR_ACCOUNT_COLUMNS)
+
+
+def _save_tutor_account_local(email, tutor_name, department, semester, tutor_id=None):
+    email = _normalise_tutor_email(email)
+    df = load_tutor_accounts()
+    tutor_id = tutor_id or email
+    row = {"Email":email,"Tutor_Name":str(tutor_name).strip(),"Department":str(department).strip(),"Semester":str(semester).strip().upper(),"Tutor_ID":str(tutor_id).strip(),"Created_Time":datetime.now().strftime("%Y-%m-%d %H:%M:%S"),"Last_Login":""}
+    if not df.empty:
+        mask=df["Email"].astype(str).str.lower().eq(email)
+        if mask.any():
+            old=df[mask].iloc[0].to_dict(); row["Created_Time"]=old.get("Created_Time",row["Created_Time"]); row["Last_Login"]=old.get("Last_Login","")
+            df.loc[mask,list(row.keys())]=list(row.values())
+        else: df=pd.concat([df,pd.DataFrame([row])],ignore_index=True)
+    else: df=pd.DataFrame([row],columns=TUTOR_ACCOUNT_COLUMNS)
+    df.to_csv(TUTOR_ACCOUNT_FILE,index=False)
+    return row
+
+
+def create_tutor_account(email, tutor_name, department, semester):
+    email=_normalise_tutor_email(email)
+    if not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$",email): return None,"Enter a valid email address."
+    if not tutor_name.strip(): return None,"Enter the tutor name."
+    sb=_get_shared_supabase()
+    try:
+        if sb is not None:
+            existing=sb.table("tutor_accounts").select("*").eq("email",email).limit(1).execute()
+            er=list(getattr(existing,"data",None) or [])
+            if er: return er[0],"This email already has a tutor account. Use the email to log in."
+            row={"email":email,"tutor_id":email,"tutor_name":tutor_name.strip(),"department":department.strip(),"semester":semester.strip().upper(),"balance":0,"active":True}
+            sb.table("tutor_accounts").insert(row).execute()
+            sb.table("tutors").upsert({"tutor_id":email,"tutor_name":tutor_name.strip(),"department":department.strip(),"semester":semester.strip().upper(),"credit_score":0,"active":True},on_conflict="tutor_id").execute()
+            return _save_tutor_account_local(email,tutor_name,department,semester,email),"created"
+        local=load_tutor_accounts()
+        if not local.empty and local["Email"].astype(str).str.lower().eq(email).any(): return local[local["Email"].astype(str).str.lower().eq(email)].iloc[0].to_dict(),"This email already has a tutor account."
+        row=_save_tutor_account_local(email,tutor_name,department,semester,email); save_tutor_profile(email,tutor_name,department,0.0); return row,"created"
+    except Exception as exc: return None,f"Account creation failed: {exc}"
+
+
+def get_tutor_account(email):
+    email=_normalise_tutor_email(email)
+    if not email: return None
+    try:
+        sb=_get_shared_supabase()
+        if sb is not None:
+            res=sb.table("tutor_accounts").select("*").eq("email",email).limit(1).execute(); data=list(getattr(res,"data",None) or [])
+            if data: return data[0]
+    except Exception: pass
+    df=load_tutor_accounts()
+    if df.empty: return None
+    x=df[df["Email"].astype(str).str.lower().eq(email)]
+    return x.iloc[0].to_dict() if not x.empty else None
+
+
+def touch_tutor_account_login(email):
+    email=_normalise_tutor_email(email); stamp=datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    try:
+        sb=_get_shared_supabase()
+        if sb is not None: sb.table("tutor_accounts").update({"last_login":stamp}).eq("email",email).execute()
+    except Exception: pass
+    df=load_tutor_accounts()
+    if not df.empty:
+        mask=df["Email"].astype(str).str.lower().eq(email)
+        if mask.any(): df.loc[mask,"Last_Login"]=stamp; df.to_csv(TUTOR_ACCOUNT_FILE,index=False)
+
+
+def get_tutor_wallet(email):
+    email=_normalise_tutor_email(email)
+    try:
+        sb=_get_shared_supabase()
+        if sb is not None:
+            acct=sb.table("tutor_accounts").select("balance").eq("email",email).limit(1).execute(); ar=list(getattr(acct,"data",None) or [])
+            balance=float(ar[0].get("balance") or 0) if ar else 0.0
+            tx=sb.table("tutor_salary_transactions").select("*").eq("tutor_id",email).order("sent_at",desc=True).execute()
+            return {"balance":balance,"transactions":list(getattr(tx,"data",None) or [])}
+    except Exception: pass
+    return {"balance":0.0,"transactions":[]}
 
 
 def save_tutor_profile(username, tutor_name, department, credit_score):
@@ -1409,26 +1498,52 @@ def login_shell(title, subtitle):
     """, unsafe_allow_html=True)
 
 
+def tutor_create_account_panel():
+    st.markdown("### 🆕 Create Tutor Account")
+    st.caption("Create your tutor account once. After that, log in using the registered email ID only.")
+    with st.form("tutor_create_account_form"):
+        email=st.text_input("📧 Tutor Email",placeholder="teacher_ceS3tutor@gmail.com")
+        name=st.text_input("👨‍🏫 Tutor Name",placeholder="Enter your full name")
+        department=st.selectbox("🎓 Department",DEPARTMENTS,key="new_tutor_department")
+        semester=st.selectbox("📚 Semester",SEMESTERS,key="new_tutor_semester")
+        create=st.form_submit_button("✨ Create One-Time Account",type="primary",use_container_width=True)
+    if create:
+        account,message=create_tutor_account(email,name,department,semester)
+        if account and message=="created":
+            st.success("✅ Tutor account created successfully. You can now log in with this email ID.")
+            st.info(f"📧 Login email: **{email.strip().lower()}**")
+            st.session_state.tutor_account_email=email.strip().lower()
+        elif account:
+            st.warning(f"ℹ️ {message}"); st.info(f"📧 Use **{email.strip().lower()}** on the login form.")
+        else: st.error(message)
+
+
 def teacher_login():
-    if AUTOREFRESH_AVAILABLE:
-        st_autorefresh(interval=60_000, key="teacher_login_minute_refresh")
-    login_shell("Tutor Login", "Use the tutor account assigned to your department")
+    if AUTOREFRESH_AVAILABLE: st_autorefresh(interval=60_000,key="teacher_login_minute_refresh")
+    login_shell("Tutor Login","Login with your one-time registered email account")
+    st.markdown("""<style>div[data-testid=\"stButton\"] > button.tutor-account-circle{border-radius:50%!important;width:58px!important;height:58px!important;padding:0!important;font-size:24px!important;position:fixed!important;right:28px!important;top:78px!important;z-index:9999!important;border:2px solid rgba(125,211,252,.75)!important;box-shadow:0 8px 28px rgba(0,0,0,.35)!important}</style>""",unsafe_allow_html=True)
+    circle=st.button("👤",key="tutor_account_circle",help="Create one-time tutor account")
+    if circle:
+        st.session_state.show_tutor_create=not st.session_state.get("show_tutor_create",False); st.rerun()
+    if st.session_state.get("show_tutor_create",False):
+        tutor_create_account_panel(); st.divider(); st.markdown("### 🔐 Existing Tutor Account Login")
     with st.form("teacher_login_form"):
-        username=st.text_input("Tutor Username")
-        password=st.text_input("Password",type="password")
-        c1,c2=st.columns(2)
-        login=c1.form_submit_button("🔐 Login",use_container_width=True,type="primary")
-        back=c2.form_submit_button("← Back",use_container_width=True)
-    if back:
-        st.session_state.page="home"; st.rerun()
+        email=st.text_input("📧 Tutor Email ID",value=st.session_state.get("tutor_account_email",""),placeholder="teacher_ceS3tutor@gmail.com")
+        c1,c2=st.columns(2); login=c1.form_submit_button("🔐 Login",use_container_width=True,type="primary"); back=c2.form_submit_button("← Back",use_container_width=True)
+    if back: st.session_state.page="home"; st.rerun()
     if login:
-        account=TEACHERS.get(username.strip())
-        if account and account["password"]==password:
-            st.session_state.logged_in=True; st.session_state.role="teacher"; st.session_state.username=username.strip()
-            st.session_state.teacher_department=account["department"]; st.session_state.page="teacher_dashboard"
-            audit("Tutor Login","Tutor",username.strip(),"",account["department"],"","Successful login")
-            st.rerun()
-        else: st.error("Invalid tutor username or password.")
+        email=_normalise_tutor_email(email); account=get_tutor_account(email)
+        if account:
+            st.session_state.logged_in=True; st.session_state.role="teacher"; st.session_state.username=email; st.session_state.tutor_account_email=email
+            st.session_state.teacher_department=str(account.get("department") or DEPARTMENTS[0]); st.session_state.teacher_semester=str(account.get("semester") or "S3").upper(); touch_tutor_account_login(email)
+            save_tutor_profile(email,str(account.get("tutor_name") or email),st.session_state.teacher_department,0.0)
+            audit("Tutor Login","Tutor",email,"",st.session_state.teacher_department,st.session_state.teacher_semester,f"Email account login; Tutor={account.get('tutor_name','')}")
+            st.session_state.show_tutor_create=False; st.session_state.page="teacher_dashboard"; st.rerun()
+        else:
+            old=TEACHERS.get(email)
+            if old:
+                st.session_state.logged_in=True; st.session_state.role="teacher"; st.session_state.username=email; st.session_state.teacher_department=old["department"]; st.session_state.teacher_semester="S3"; st.session_state.page="teacher_dashboard"; audit("Tutor Login","Tutor",email,"",old["department"],"S3","Legacy tutor login"); st.rerun()
+            else: st.error("Tutor account not found. Click the 👤 circle button and create the one-time account first.")
 
 
 def student_login():
@@ -1942,10 +2057,17 @@ def teacher_dashboard():
     st.title("👨‍🏫 Tutor Dashboard")
     tutor_profile=get_tutor_profile(st.session_state.username)
     tutor_display=tutor_profile.get("Tutor_Name") or st.session_state.username
+    wallet=get_tutor_wallet(st.session_state.get("tutor_account_email") or st.session_state.username)
     st.info(f"Tutor: **{tutor_display}**  •  Department: **{assigned_department}**")
+    st.metric("💳 Salary Account Balance",f"₹{float(wallet.get('balance',0)):,.2f}")
+    if wallet.get("transactions"):
+        with st.expander("💰 Salary Credit History"):
+            txdf=pd.DataFrame([{"Date":x.get("sent_at",""),"Month":x.get("salary_month",""),"Amount":f"₹{float(x.get('amount') or 0):,.2f}","Reference":x.get("reference","")} for x in wallet["transactions"]])
+            st.dataframe(txdf,use_container_width=True,hide_index=True)
     c1,c2,c3 = st.columns([2.2,1.0,0.8])
     department = c1.selectbox("🎓 B.Tech Department", DEPARTMENTS, index=DEPARTMENTS.index(assigned_department), key="dashboard_department")
-    semester = c2.selectbox("📚 Semester", SEMESTERS, index=2, key="dashboard_semester")
+    default_sem=str(st.session_state.get("teacher_semester","S3")).upper(); sem_index=SEMESTERS.index(default_sem) if default_sem in SEMESTERS else 2
+    semester = c2.selectbox("📚 Semester", SEMESTERS, index=sem_index, key="dashboard_semester")
     if c3.button("➡️ Next Dashboard", use_container_width=True):
         st.session_state.page = "all_department_analysis"; st.rerun()
     subjects = get_subjects(department, semester)
