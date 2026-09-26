@@ -364,6 +364,27 @@ def inject_css():
     @keyframes cardshine {{ from{{transform:translate3d(-25%,-10%,0) rotate(0deg)}} to{{transform:translate3d(25%,10%,0) rotate(360deg)}} }}
     @keyframes pop {{ from{{transform:scale(.82);opacity:0}} to{{transform:scale(1);opacity:1}} }}
     /* Friendly Tutor + Student portal controls */
+    /* Friendly Tutor / Student navigation */
+    .friendly-portal-tabs {{
+        margin: 10px 0 18px;
+        padding: 10px 14px;
+        border-radius: 18px;
+        background: rgba(15,23,42,.62);
+        border: 1px solid rgba(125,211,252,.14);
+    }}
+    .portal-help {{
+        margin: 6px 0 16px; padding: 10px 14px; border-radius: 14px;
+        background: rgba(14,165,233,.08); border: 1px solid rgba(125,211,252,.12);
+        color: #cbd5e1; font-size: .92rem;
+    }}
+    [data-baseweb="tab-list"] {{ gap: 6px; }}
+    [data-baseweb="tab"] {{
+        border-radius: 12px !important; padding: 10px 14px !important;
+        font-weight: 600 !important;
+    }}
+    @media (max-width: 768px) {{
+        [data-baseweb="tab"] {{ padding: 8px 9px !important; font-size: .82rem !important; }}
+    }}
     .portal-strip{{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:16px 18px;margin:8px 0 16px;border:1px solid rgba(125,211,252,.16);border-radius:20px;background:rgba(15,23,42,.62);backdrop-filter:blur(14px);}}
     .portal-strip .portal-title{{font-size:1.35rem;font-weight:850;color:#f8fafc;}}
     .portal-strip .portal-sub{{font-size:.84rem;color:#9fb0c8;margin-top:3px;}}
@@ -2308,92 +2329,111 @@ def teacher_dashboard():
     tutor_profile=get_tutor_profile(st.session_state.username)
     tutor_display=get_current_tutor_name()
     st.markdown(f'<div class="portal-strip"><div><div class="portal-title">👨‍🏫 Tutor Portal</div><div class="portal-sub">Welcome, {escape(str(tutor_display))} • {escape(str(assigned_department))}</div></div><div style="font-size:2rem">🎓</div></div>',unsafe_allow_html=True)
-    st.markdown("<div class='friendly-note'>💡 <b>Easy workflow:</b> Register students → Enter marks → Upload files → Check records & analysis.</div>",unsafe_allow_html=True)
+    st.markdown("<div class='friendly-note'>💡 <b>Easy workflow:</b> 1. Register students → 2. Enter marks → 3. Upload files → 4. Check records & analysis.</div>",unsafe_allow_html=True)
     st.caption("💳 Salary Account is separate. Open it from the 👤 account icon on the Tutor Login page.")
+
     c1,c2,c3 = st.columns([2.2,1.0,0.8])
     department = c1.selectbox("🎓 B.Tech Department", DEPARTMENTS, index=DEPARTMENTS.index(assigned_department), key="dashboard_department")
     default_sem=str(st.session_state.get("teacher_semester","S3")).upper(); sem_index=SEMESTERS.index(default_sem) if default_sem in SEMESTERS else 2
     semester = c2.selectbox("📚 Semester", SEMESTERS, index=sem_index, key="dashboard_semester")
-    if c3.button("➡️ Next Dashboard", use_container_width=True):
+    if c3.button("➡️ All Departments", use_container_width=True):
         st.session_state.page = "all_department_analysis"; safe_rerun()
     subjects = get_subjects(department, semester)
     if len(subjects) != 6:
         st.error(f"No complete 6-subject mapping is configured for **{department} — {semester}**.")
         return
     st.success(f"📖 Active curriculum: **{department} — {semester}**")
-    tutor_section = st.radio(
-        "Tutor section",
-        ["📝 Registration", "📊 Mark Entry", "📎 Student Files", "👥 Records", "📈 K-Means", "👨‍🏫 Tutor Profile", "🗑️ Delete Student"],
-        horizontal=True,
-        key="tutor_section_navigation",
-        label_visibility="collapsed",
-    )
-    if tutor_section == "📝 Registration":
-        tutor_registration_form(department, semester)
-    elif tutor_section == "📊 Mark Entry":
-        tutor_mark_entry(department, semester)
-    elif tutor_section == "📎 Student Files":
+
+    st.markdown("<div class='portal-help'>👆 Choose a section below. Your existing Tutor features are unchanged; this layout simply keeps them organised and easier to find.</div>",unsafe_allow_html=True)
+    tab_students, tab_files, tab_records, tab_tools = st.tabs([
+        "📝 Students",
+        "📎 Files",
+        "📊 Records & Analysis",
+        "⚙️ Tutor Tools",
+    ])
+
+    with tab_students:
+        st.markdown("### 👨‍🎓 Student Management")
+        st.caption("Register a new student or enter/update marks.")
+        reg_tab, marks_tab = st.tabs(["📝 Registration", "📊 Mark Entry"])
+        with reg_tab:
+            tutor_registration_form(department, semester)
+        with marks_tab:
+            tutor_mark_entry(department, semester)
+
+    with tab_files:
+        st.markdown("### 📎 Student Files")
+        st.caption("Upload and manage profile photos or documents for students.")
         tutor_student_files(department, semester)
-    elif tutor_section == "👥 Records":
-        df = load_reports()
-        filtered = df[(df["Department"].astype(str)==str(department)) & (df["Semester"].astype(str).str.upper()==str(semester).upper())].copy()
-        st.subheader(f"Student Records — {department} — {semester} ({len(filtered)})")
-        if filtered.empty:
-            st.info("No marks submitted yet. Registered students will appear in the Registration tab.")
-        else:
-            show=filtered[["Student_Name","University_ID","Semester","Department","Created_Time"]]
-            st.dataframe(show,use_container_width=True,hide_index=True)
-            ids=show["University_ID"].astype(str).tolist()
-            selected=st.selectbox("Select University ID",ids,key="record_student_id")
-            row=filtered[filtered["University_ID"].astype(str).eq(str(selected))].iloc[0].to_dict()
-            subs=parse_subjects(row["Subjects_JSON"])
-            overall=float(np.mean([x["Overall"] for x in subs])) if subs else 0.0
-            st.metric("Selected Student Overall",f"{overall:.2f}%")
-            rows=[[x["Subject"],x["Attendance"],x["Internal"],x["Assignment"],x["Previous"],x["Overall"],x["Level"]] for x in subs]
-            st.dataframe(pd.DataFrame(rows,columns=["Subject","Attendance","Internal","Assignment","Previous","Score","Performance"]),use_container_width=True,hide_index=True)
-            c1,c2=st.columns(2)
-            c1.download_button("📥 Download Progress PDF",create_pdf(row),f"{selected}_Progress_Report.pdf","application/pdf",use_container_width=True)
-            card=create_student_card_png(row)
-            if card:
-                c2.download_button("🪪 Download Student Card",card,f"{selected}_Student_Card.png","image/png",use_container_width=True)
-    elif tutor_section == "📈 K-Means":
-        st.subheader(f"📈 K-Means Analysis — {department} — {semester}")
-        result=kmeans_analysis(department)
-        if not result.get("available"):
-            st.warning(result.get("message","Analysis unavailable."))
-        else:
-            records=result["records"].copy(); semester_students=load_reports()
-            ids_for_sem=set(semester_students[(semester_students["Department"].astype(str)==str(department))&(semester_students["Semester"].astype(str).str.upper()==str(semester).upper())]["University_ID"].astype(str))
-            selected_records=records[records["University_ID"].astype(str).isin(ids_for_sem)].copy()
-            st.metric("Subject records in selected semester",len(selected_records))
-            st.dataframe(selected_records,use_container_width=True,hide_index=True)
-            st.caption(f"K-Means is calculated from all available records in the selected department. Inertia: {result['inertia']:.4f}")
-            st.dataframe(pd.DataFrame(result["summary"]),use_container_width=True,hide_index=True)
-            st.dataframe(pd.DataFrame(result["centroids"]),use_container_width=True,hide_index=True)
-            st.download_button("📊 Download K-Means Analysis PDF",create_kmeans_pdf(result),f"{department.replace(' ','_')}_KMeans_Analysis.pdf","application/pdf",use_container_width=True,type="primary")
-    elif tutor_section == "👨‍🏫 Tutor Profile":
-        tutor_profile_tab()
-    elif tutor_section == "🗑️ Delete Student":
-        st.subheader("🗑️ Delete Registered Student")
-        st.warning("This is the separate student-deletion page. Select ONE student, then delete that student's complete details. This action removes registration, marks, Smart Card and linked files.")
-        reg = load_registrations()
-        if reg.empty:
-            st.info("No registered students are available to delete.")
-        else:
-            reg = reg.copy()
-            reg["University_ID"] = reg["University_ID"].astype(str)
-            # Show all registered students, not only students with marks.
-            reg = reg.drop_duplicates(subset=["University_ID"], keep="last")
-            labels = {f"{r['University_ID']} — {r['Student_Name']}": r for _, r in reg.iterrows()}
-            label = st.selectbox("Select one registered student", list(labels.keys()), key="delete_registered_student")
-            selected_student = labels[label]
-            st.markdown(f"**Student:** {selected_student['Student_Name']}  \n**University ID:** {selected_student['University_ID']}  \n**Department:** {selected_student['Department']}  \n**Semester:** {selected_student['Semester']}")
-            confirm = st.checkbox("I confirm that I want to permanently delete this student's complete details.", key="confirm_delete_student")
-            if st.button("🗑️ Delete This Student Completely", type="primary", use_container_width=True, disabled=not confirm):
-                uid = str(selected_student["University_ID"])
-                delete_student(uid, str(selected_student.get("Department", department)), str(selected_student.get("Semester", semester)), st.session_state.get("username", ""))
-                st.success(f"✅ {uid} and all linked student details were deleted.")
-                safe_rerun()
+
+    with tab_records:
+        st.markdown("### 📊 Records & Analysis")
+        st.caption("View student records or run K-Means analysis.")
+        records_tab, kmeans_tab = st.tabs(["👥 Records", "📈 K-Means"])
+        with records_tab:
+            df = load_reports()
+            filtered = df[(df["Department"].astype(str)==str(department)) & (df["Semester"].astype(str).str.upper()==str(semester).upper())].copy()
+            st.subheader(f"Student Records — {department} — {semester} ({len(filtered)})")
+            if filtered.empty:
+                st.info("No marks submitted yet. Registered students will appear in the Registration tab.")
+            else:
+                show=filtered[["Student_Name","University_ID","Semester","Department","Created_Time"]]
+                st.dataframe(show,use_container_width=True,hide_index=True)
+                ids=show["University_ID"].astype(str).tolist()
+                selected=st.selectbox("Select University ID",ids,key="record_student_id")
+                row=filtered[filtered["University_ID"].astype(str).eq(str(selected))].iloc[0].to_dict()
+                subs=parse_subjects(row["Subjects_JSON"])
+                overall=float(np.mean([x["Overall"] for x in subs])) if subs else 0.0
+                st.metric("Selected Student Overall",f"{overall:.2f}%")
+                rows=[[x["Subject"],x["Attendance"],x["Internal"],x["Assignment"],x["Previous"],x["Overall"],x["Level"]] for x in subs]
+                st.dataframe(pd.DataFrame(rows,columns=["Subject","Attendance","Internal","Assignment","Previous","Score","Performance"]),use_container_width=True,hide_index=True)
+                c1,c2=st.columns(2)
+                c1.download_button("📥 Download Progress PDF",create_pdf(row),f"{selected}_Progress_Report.pdf","application/pdf",use_container_width=True)
+                card=create_student_card_png(row)
+                if card:
+                    c2.download_button("🪪 Download Student Card",card,f"{selected}_Student_Card.png","image/png",use_container_width=True)
+        with kmeans_tab:
+            st.subheader(f"📈 K-Means Analysis — {department} — {semester}")
+            result=kmeans_analysis(department)
+            if not result.get("available"):
+                st.warning(result.get("message","Analysis unavailable."))
+            else:
+                records=result["records"].copy(); semester_students=load_reports()
+                ids_for_sem=set(semester_students[(semester_students["Department"].astype(str)==str(department))&(semester_students["Semester"].astype(str).str.upper()==str(semester).upper())]["University_ID"].astype(str))
+                selected_records=records[records["University_ID"].astype(str).isin(ids_for_sem)].copy()
+                st.metric("Subject records in selected semester",len(selected_records))
+                st.dataframe(selected_records,use_container_width=True,hide_index=True)
+                st.caption(f"K-Means is calculated from all available records in the selected department. Inertia: {result['inertia']:.4f}")
+                st.dataframe(pd.DataFrame(result["summary"]),use_container_width=True,hide_index=True)
+                st.dataframe(pd.DataFrame(result["centroids"]),use_container_width=True,hide_index=True)
+                st.download_button("📊 Download K-Means Analysis PDF",create_kmeans_pdf(result),f"{department.replace(' ','_')}_KMeans_Analysis.pdf","application/pdf",use_container_width=True,type="primary")
+
+    with tab_tools:
+        st.markdown("### ⚙️ Tutor Tools")
+        st.caption("Manage your tutor profile or permanently remove a student.")
+        profile_tab, delete_tab = st.tabs(["👨‍🏫 Tutor Profile", "🗑️ Delete Student"])
+        with profile_tab:
+            tutor_profile_tab()
+        with delete_tab:
+            st.subheader("🗑️ Delete Registered Student")
+            st.warning("This is the separate student-deletion page. Select ONE student, then delete that student's complete details. This action removes registration, marks, Smart Card and linked files.")
+            reg = load_registrations()
+            if reg.empty:
+                st.info("No registered students are available to delete.")
+            else:
+                reg = reg.copy()
+                reg["University_ID"] = reg["University_ID"].astype(str)
+                reg = reg.drop_duplicates(subset=["University_ID"], keep="last")
+                labels = {f"{r['University_ID']} — {r['Student_Name']}": r for _, r in reg.iterrows()}
+                label = st.selectbox("Select one registered student", list(labels.keys()), key="delete_registered_student")
+                selected_student = labels[label]
+                st.markdown(f"**Student:** {selected_student['Student_Name']}  \n**University ID:** {selected_student['University_ID']}  \n**Department:** {selected_student['Department']}  \n**Semester:** {selected_student['Semester']}")
+                confirm = st.checkbox("I confirm that I want to permanently delete this student's complete details.", key="confirm_delete_student")
+                if st.button("🗑️ Delete This Student Completely", type="primary", use_container_width=True, disabled=not confirm):
+                    uid = str(selected_student["University_ID"])
+                    delete_student(uid, str(selected_student.get("Department", department)), str(selected_student.get("Semester", semester)), st.session_state.get("username", ""))
+                    st.success(f"✅ {uid} and all linked student details were deleted.")
+                    safe_rerun()
 
 # ============================================================
 # STUDENT WORKFLOW
@@ -2412,90 +2452,97 @@ def student_dashboard():
         if not x.empty: report=x.iloc[0].to_dict()
     profile=reg or student
     st.markdown(f'<div class="portal-strip"><div><div class="portal-title">🎓 Student Portal</div><div class="portal-sub">Welcome, {escape(str(profile.get("Student_Name","Student")))} • University ID: {escape(str(uid))}</div></div><div style="font-size:2rem">📚</div></div>',unsafe_allow_html=True)
-    st.markdown("<div class='friendly-note'>💡 Use the buttons below for your Smart Card or logout. Your profile, tutor files and performance result are shown in simple sections.</div>",unsafe_allow_html=True)
-    c1,c2=st.columns(2)
-    if c1.button("🪪 Student Smart Card (Self Registration)",use_container_width=True,type="primary"):
-        st.session_state.smart_card_registration=find_smart_card_registration(uid); st.session_state.smart_card_hidden=False; st.session_state.page="smart_card"; safe_rerun()
-    if c2.button("🚪 Logout",use_container_width=True):
-        audit("Student Logout","Student","",uid,profile.get("Department",""),profile.get("Semester",""),"Logout")
-        logout()
+    st.markdown("<div class='friendly-note'>💡 <b>Simple navigation:</b> Profile → Tutor Files → Calculate Result → Result & Progress. Your original features and information are unchanged.</div>",unsafe_allow_html=True)
 
-    st.subheader("👤 My Registered Profile")
-    p1,p2,p3=st.columns(3)
-    p1.metric("Student",profile.get("Student_Name","")); p2.metric("University ID",uid); p3.metric("Semester",profile.get("Semester",""))
-    st.write(f"**Department:** {profile.get('Department','')}")
+    overview_tab, files_tab, result_tab = st.tabs(["🏠 My Profile", "📎 Tutor Files", "📊 Result & Progress"])
 
-    files=get_student_files(uid)
-    if files:
-        st.subheader("📎 Files from Tutor")
-        for path in files:
-            name=os.path.basename(path)
-            ext=os.path.splitext(name)[1].lower()
-            if ext in {".png",".jpg",".jpeg",".webp"}:
-                st.image(path,caption=name,width=240)
-            with open(path,"rb") as f:
-                st.download_button(f"📥 {name}",f.read(),name,key=f"student_file_{name}")
-
-    if not report or not str(report.get("Subjects_JSON","")).strip() or str(report.get("Subjects_JSON")) in {"[]","nan"}:
-        st.info("⏳ Your profile is registered. Marks are not submitted yet. The Calculate My Result section will appear after your tutor submits marks.")
-        return
-
-    st.subheader("📊 Calculate My Mark")
-    subjects=parse_subjects(report["Subjects_JSON"])
-    with st.form("study_hours_form"):
-        st.caption("Enter your total daily study hours once. This value is applied consistently to all subjects for the prediction.")
-        total_study_hours=st.number_input("⏱️ Total daily study hours",0.0,24.0,2.0,0.5,key="student_total_study_hours")
-        calculate=st.form_submit_button("📊 Calculate My Result",use_container_width=True,type="primary")
-    if calculate:
-        updated=[]
-        for item in subjects:
-            copy=dict(item); copy["Study_Hours"]=float(total_study_hours); updated.append(normalize_subject(copy))
-        report["Subjects_JSON"]=json.dumps(updated); subjects=updated; st.session_state.student_report=report
-        audit("Calculate My Mark","Student","",uid,profile.get("Department",""),profile.get("Semester",""),f"Total daily study hours={total_study_hours}")
-
-    subjects=parse_subjects(st.session_state.student_report["Subjects_JSON"])
-    overall=float(np.mean([x["Overall"] for x in subjects])) if subjects else 0
-    total_credits, earned_credit_subjects = calculate_total_credits(subjects)
-    max_credits = sum(SUBJECT_CREDITS[:len(subjects)])
-    tutor_prediction=str(subjects[0].get("Automatic_Prediction", automatic_prediction(overall/10))) if subjects else automatic_prediction(overall/10)
-    if any(float(x.get("Study_Hours",0))>0 for x in subjects):
-        if overall>=80:
-            st.balloons(); st.markdown(f'<div class="good-pop"><div style="font-size:3rem">🎉🏆</div><h2>Good Performance</h2><p>Keep your consistency. Overall score: <b>{overall:.2f}%</b></p></div>',unsafe_allow_html=True)
-        elif overall<50:
-            st.markdown(f'<div class="sad-pop"><div style="font-size:3rem">😔📉</div><h2>Needs Improvement</h2><p>Follow the subject-wise improvement methods. Overall score: <b>{overall:.2f}%</b></p></div>',unsafe_allow_html=True)
-        else:
-            st.info(f"📘 Overall score: **{overall:.2f}%**")
-        a,b,c=st.columns(3)
-        a.markdown(f'<div class="metric-card"><div class="label">Overall Score</div><div class="value">{overall:.2f}%</div></div>',unsafe_allow_html=True)
-        b.markdown(f'<div class="metric-card"><div class="label">Subjects</div><div class="value">{len(subjects)}</div></div>',unsafe_allow_html=True)
-        status="Good" if overall>=80 else "Above Average" if overall>=65 else "Average" if overall>=50 else "Needs Improvement"
-        c.markdown(f'<div class="metric-card"><div class="label">Status</div><div class="value">{status}</div></div>',unsafe_allow_html=True)
-        d1,d2=st.columns(2)
-        d1.markdown(f'<div class="metric-card"><div class="label">🎓 Total Earned Credits</div><div class="value">{total_credits}/{max_credits}</div></div>',unsafe_allow_html=True)
-        d2.markdown(f'<div class="metric-card"><div class="label">Automatic Prediction</div><div class="value">{tutor_prediction}</div></div>',unsafe_allow_html=True)
-        if earned_credit_subjects:
-            st.success("✅ Credits earned: " + ", ".join(earned_credit_subjects))
-        else:
-            st.warning("⚠️ No subject credit earned yet. A subject gives credit only when its score is 40% or above.")
-        rows=[]
-        for x in subjects:
-            idx = subjects.index(x)
-            subject_credit = SUBJECT_CREDITS[idx] if idx < len(SUBJECT_CREDITS) else 0
-            passed = subject_passed(x)
-            rows.append([x["Subject"],f"{x['Attendance']:.0f}%",f"{x.get('Attendance_Mark',attendance_mark(x['Attendance']))}/5",f"{x['Internal']:.0f}/40",f"{x['Assignment']:.0f}/15",f"{x['Previous']:.0f}/60",f"{x['Study_Hours']:.1f} h",f"{x['Overall']:.1f}%", "PASS" if passed else "NOT PASS", f"{subject_credit if passed else 0} cr",f"{x.get('Circle',performance_circle(x['Level']))} {x['Level']}"])
-        st.subheader("📊 Subject-wise Result")
-        st.dataframe(pd.DataFrame(rows,columns=["Subject","Attendance","Att. Mark","Internal","Assignment","Previous","Study","Score","Pass","Credit","Performance"]),use_container_width=True,hide_index=True)
-        st.subheader("🎯 Improvement")
-        for x in subjects:
-            with st.expander(f"{x.get('Circle',performance_circle(x['Level']))} {x['Subject']} — {x['Level']} — {x['Overall']:.1f}%"):
-                st.write(f"Attendance **{x['Attendance']:.0f}%**, Internal **{x['Internal']:.0f}/40**, Assignment **{x['Assignment']:.0f}/15**, Previous **{x['Previous']:.0f}/60**, Study **{x['Study_Hours']:.1f} h/day**.")
-                st.success("💚 "+x.get("Compliment","Keep progressing!"))
-                for recommendation in x.get("Recommendations",[]): st.write("• "+recommendation)
-        st.caption("🔴 Needs Improvement  •  🟠 Average  •  🟡 Above Average  •  🟢 Good")
+    with overview_tab:
         c1,c2=st.columns(2)
-        c1.download_button("📥 Download Progress Report PDF",create_pdf(st.session_state.student_report),f"{uid}_Progress_Report.pdf","application/pdf",use_container_width=True,type="primary")
-        card=create_student_card_png(profile)
-        if card: c2.download_button("🪪 Download Smart Card PNG",card,f"{uid}_Smart_Card.png","image/png",use_container_width=True)
+        if c1.button("🪪 Student Smart Card (Self Registration)",use_container_width=True,type="primary"):
+            st.session_state.smart_card_registration=find_smart_card_registration(uid); st.session_state.smart_card_hidden=False; st.session_state.page="smart_card"; safe_rerun()
+        if c2.button("🚪 Logout",use_container_width=True):
+            audit("Student Logout","Student","",uid,profile.get("Department",""),profile.get("Semester",""),"Logout")
+            logout()
+        st.subheader("👤 My Registered Profile")
+        p1,p2,p3=st.columns(3)
+        p1.metric("Student",profile.get("Student_Name","")); p2.metric("University ID",uid); p3.metric("Semester",profile.get("Semester",""))
+        st.write(f"**Department:** {profile.get('Department','')}")
+
+    with files_tab:
+        files=get_student_files(uid)
+        if files:
+            st.subheader("📎 Files from Tutor")
+            st.caption("Files uploaded by your tutor are available here.")
+            for path in files:
+                name=os.path.basename(path)
+                ext=os.path.splitext(name)[1].lower()
+                if ext in {".png",".jpg",".jpeg",".webp"}:
+                    st.image(path,caption=name,width=240)
+                with open(path,"rb") as f:
+                    st.download_button(f"📥 {name}",f.read(),name,key=f"student_file_{name}")
+        else:
+            st.info("No files have been uploaded by your tutor yet.")
+
+    with result_tab:
+        if not report or not str(report.get("Subjects_JSON","")).strip() or str(report.get("Subjects_JSON")) in {"[]","nan"}:
+            st.info("⏳ Your profile is registered. Marks are not submitted yet. The Calculate My Result section will appear after your tutor submits marks.")
+        else:
+            st.subheader("📊 Calculate My Mark")
+            subjects=parse_subjects(report["Subjects_JSON"])
+            with st.form("study_hours_form"):
+                st.caption("Enter your total daily study hours once. This value is applied consistently to all subjects for the prediction.")
+                total_study_hours=st.number_input("⏱️ Total daily study hours",0.0,24.0,2.0,0.5,key="student_total_study_hours")
+                calculate=st.form_submit_button("📊 Calculate My Result",use_container_width=True,type="primary")
+            if calculate:
+                updated=[]
+                for item in subjects:
+                    copy=dict(item); copy["Study_Hours"]=float(total_study_hours); updated.append(normalize_subject(copy))
+                report["Subjects_JSON"]=json.dumps(updated); subjects=updated; st.session_state.student_report=report
+                audit("Calculate My Mark","Student","",uid,profile.get("Department",""),profile.get("Semester",""),f"Total daily study hours={total_study_hours}")
+
+            subjects=parse_subjects(st.session_state.student_report["Subjects_JSON"])
+            overall=float(np.mean([x["Overall"] for x in subjects])) if subjects else 0
+            total_credits, earned_credit_subjects = calculate_total_credits(subjects)
+            max_credits = sum(SUBJECT_CREDITS[:len(subjects)])
+            tutor_prediction=str(subjects[0].get("Automatic_Prediction", automatic_prediction(overall/10))) if subjects else automatic_prediction(overall/10)
+            if any(float(x.get("Study_Hours",0))>0 for x in subjects):
+                if overall>=80:
+                    st.balloons(); st.markdown(f'<div class="good-pop"><div style="font-size:3rem">🎉🏆</div><h2>Good Performance</h2><p>Keep your consistency. Overall score: <b>{overall:.2f}%</b></p></div>',unsafe_allow_html=True)
+                elif overall<50:
+                    st.markdown(f'<div class="sad-pop"><div style="font-size:3rem">😔📉</div><h2>Needs Improvement</h2><p>Follow the subject-wise improvement methods. Overall score: <b>{overall:.2f}%</b></p></div>',unsafe_allow_html=True)
+                else:
+                    st.info(f"📘 Overall score: **{overall:.2f}%**")
+                a,b,c=st.columns(3)
+                a.markdown(f'<div class="metric-card"><div class="label">Overall Score</div><div class="value">{overall:.2f}%</div></div>',unsafe_allow_html=True)
+                b.markdown(f'<div class="metric-card"><div class="label">Subjects</div><div class="value">{len(subjects)}</div></div>',unsafe_allow_html=True)
+                status="Good" if overall>=80 else "Above Average" if overall>=65 else "Average" if overall>=50 else "Needs Improvement"
+                c.markdown(f'<div class="metric-card"><div class="label">Status</div><div class="value">{status}</div></div>',unsafe_allow_html=True)
+                d1,d2=st.columns(2)
+                d1.markdown(f'<div class="metric-card"><div class="label">🎓 Total Earned Credits</div><div class="value">{total_credits}/{max_credits}</div></div>',unsafe_allow_html=True)
+                d2.markdown(f'<div class="metric-card"><div class="label">Automatic Prediction</div><div class="value">{tutor_prediction}</div></div>',unsafe_allow_html=True)
+                if earned_credit_subjects:
+                    st.success("✅ Credits earned: " + ", ".join(earned_credit_subjects))
+                else:
+                    st.warning("⚠️ No subject credit earned yet. A subject gives credit only when its score is 40% or above.")
+                rows=[]
+                for x in subjects:
+                    idx = subjects.index(x)
+                    subject_credit = SUBJECT_CREDITS[idx] if idx < len(SUBJECT_CREDITS) else 0
+                    passed = subject_passed(x)
+                    rows.append([x["Subject"],f"{x['Attendance']:.0f}%",f"{x.get('Attendance_Mark',attendance_mark(x['Attendance']))}/5",f"{x['Internal']:.0f}/40",f"{x['Assignment']:.0f}/15",f"{x['Previous']:.0f}/60",f"{x['Study_Hours']:.1f} h",f"{x['Overall']:.1f}%", "PASS" if passed else "NOT PASS", f"{subject_credit if passed else 0} cr",f"{x.get('Circle',performance_circle(x['Level']))} {x['Level']}"])
+                st.subheader("📊 Subject-wise Result")
+                st.dataframe(pd.DataFrame(rows,columns=["Subject","Attendance","Att. Mark","Internal","Assignment","Previous","Study","Score","Pass","Credit","Performance"]),use_container_width=True,hide_index=True)
+                st.subheader("🎯 Improvement")
+                for x in subjects:
+                    with st.expander(f"{x.get('Circle',performance_circle(x['Level']))} {x['Subject']} — {x['Level']} — {x['Overall']:.1f}%"):
+                        st.write(f"Attendance **{x['Attendance']:.0f}%**, Internal **{x['Internal']:.0f}/40**, Assignment **{x['Assignment']:.0f}/15**, Previous **{x['Previous']:.0f}/60**, Study **{x['Study_Hours']:.1f} h/day**.")
+                        st.success("💚 "+x.get("Compliment","Keep progressing!"))
+                        for recommendation in x.get("Recommendations",[]): st.write("• "+recommendation)
+                st.caption("🔴 Needs Improvement  •  🟠 Average  •  🟡 Above Average  •  🟢 Good")
+                c1,c2=st.columns(2)
+                c1.download_button("📥 Download Progress Report PDF",create_pdf(st.session_state.student_report),f"{uid}_Progress_Report.pdf","application/pdf",use_container_width=True,type="primary")
+                card=create_student_card_png(profile)
+                if card: c2.download_button("🪪 Download Smart Card PNG",card,f"{uid}_Smart_Card.png","image/png",use_container_width=True)
 
 # Legacy session keys are intentionally retained for compatibility with saved sessions.
 # They no longer control the current dashboard UI.
