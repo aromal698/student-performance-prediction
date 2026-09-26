@@ -1653,7 +1653,7 @@ def tutor_account_login_panel():
                     "Month": x.get("salary_month", ""),
                     "Amount": f"₹{float(x.get('amount') or 0):,.2f}",
                     "Reference": x.get("reference", ""),
-                    "Status": x.get("status", "credited"),
+                    "Status": "✅ APPROVED / CREDITED" if str(x.get("status", "")).lower() == "credited" else "⏳ PENDING",
                 }
                 for x in tx
             ])
