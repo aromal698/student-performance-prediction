@@ -209,7 +209,7 @@ def calculate_total_credits(subjects):
 
 REPORT_COLUMNS = [
     "Username", "Student_Name", "University_ID", "Semester", "Department",
-    "Subjects_JSON", "CGPA", "Earned_Credits", "Total_Study_Hours", "Created_Time"
+    "Subjects_JSON", "Created_Time"
 ]
 REGISTRATION_COLUMNS = ["University_ID", "Student_Name", "Department", "Semester", "Tutor_Username", "Registered_Time"]
 TUTOR_PROFILE_COLUMNS = ["Tutor_Username", "Tutor_Name", "Department", "Credit_Score", "Updated_Time"]
@@ -777,6 +777,48 @@ def get_tutor_wallet(email):
     return {"balance":0.0,"transactions":[]}
 
 
+DEFAULT_SALARY_PER_COMPLETED_STUDENT = 100.0
+
+def create_pending_salary_for_completed_student(tutor_email, tutor_name, department, semester, university_id):
+    """Create one pending salary request for a completed student.
+
+    The request is deliberately NOT added to the tutor balance here. The
+    Principal must approve it in app2.py. This keeps tutor login/account
+    separate from salary approval.
+    """
+    email = _normalise_tutor_email(tutor_email)
+    uid = str(university_id or "").strip()
+    if not email or not uid:
+        return False, "Missing tutor email or student ID."
+    try:
+        sb = _get_shared_supabase()
+        if sb is None:
+            return False, "Shared Supabase is not configured."
+        acct = sb.table("tutor_accounts").select("email,tutor_name").eq("email", email).limit(1).execute()
+        accounts = list(getattr(acct, "data", None) or [])
+        if not accounts:
+            return False, "Tutor salary account has not been created yet."
+
+        reference = f"Student {uid} | Completed tutor work"
+        existing = sb.table("tutor_salary_transactions").select("id,status,reference").eq("tutor_id", email).execute()
+        for row in list(getattr(existing, "data", None) or []):
+            if str(row.get("reference") or "").strip() == reference:
+                return True, "Salary request already exists."
+
+        sb.table("tutor_salary_transactions").insert({
+            "tutor_id": email,
+            "tutor_name": str(tutor_name or accounts[0].get("tutor_name") or "Tutor").strip(),
+            "amount": DEFAULT_SALARY_PER_COMPLETED_STUDENT,
+            "salary_month": datetime.now().strftime("%Y-%m"),
+            "sent_by": "Tutor Completion",
+            "reference": reference,
+            "status": "pending",
+        }).execute()
+        return True, "Pending salary request created."
+    except Exception as exc:
+        return False, str(exc)
+
+
 def save_tutor_profile(username, tutor_name, department, credit_score):
     df=load_tutor_profiles()
     row={"Tutor_Username":username,"Tutor_Name":tutor_name.strip(),"Department":department,"Credit_Score":float(credit_score),"Updated_Time":datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
@@ -1125,28 +1167,7 @@ def automatic_prediction(credit_10):
         return "Average"
     return "Needs Improvement"
 
-def calculate_student_cgpa(subjects):
-    """Calculate a 10-point CGPA automatically from the six subject scores.
-    Subject credits [4,4,4,3,3,2] are used as weights.
-    """
-    if not subjects:
-        return 0.0
-    weighted = 0.0
-    credits = 0
-    for i, item in enumerate(subjects[:6]):
-        try:
-            score = max(0.0, min(float(item.get("Overall", 0.0)), 100.0)) / 10.0
-        except Exception:
-            score = 0.0
-        credit = SUBJECT_CREDITS[i] if i < len(SUBJECT_CREDITS) else 0
-        weighted += score * credit
-        credits += credit
-    return round(weighted / credits, 2) if credits else 0.0
-
 def make_report(username, name, uid, semester, department, subjects):
-    total_credits, _ = calculate_total_credits(subjects)
-    cgpa = calculate_student_cgpa(subjects)
-    total_study = round(sum(float(x.get("Study_Hours", 0) or 0) for x in subjects), 2)
     return {
         "Username": username.strip(),
         "Student_Name": name.strip(),
@@ -1154,71 +1175,32 @@ def make_report(username, name, uid, semester, department, subjects):
         "Semester": semester,
         "Department": department,
         "Subjects_JSON": json.dumps(subjects),
-        "CGPA": cgpa,
-        "Earned_Credits": total_credits,
-        "Total_Study_Hours": total_study,
         "Created_Time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
     }
 
 
-def _get_full_student_details(uid):
-    """Merge registration, marks/result and Smart Card data for Quick Visit."""
-    uid = str(uid or "").strip()
-    reg = find_registration(uid) or {}
-    result = {}
-    reports = load_reports()
-    if not reports.empty and "University_ID" in reports.columns:
-        found = reports[reports["University_ID"].astype(str).str.lower().eq(uid.lower())]
-        if not found.empty:
-            result = found.iloc[0].to_dict()
-
-    smart = {}
-    try:
-        sb = _get_shared_supabase()
-        if sb is not None:
-            smart = _smart_card_cloud_find(sb, uid) or {}
-    except Exception:
-        smart = {}
-    if not smart:
-        try:
-            local = load_smart_card_registrations()
-            if not local.empty:
-                x = local[local["University_ID"].astype(str).str.lower().eq(uid.lower())]
-                if not x.empty:
-                    smart = x.iloc[-1].to_dict()
-        except Exception:
-            pass
-
-    if not reg and not result and not smart:
-        return None
-
-    merged = {
-        "Username": result.get("Username", ""),
-        "Student_Name": reg.get("Student_Name") or result.get("Student_Name") or smart.get("name") or smart.get("Student_Name", ""),
-        "University_ID": uid,
-        "Semester": reg.get("Semester") or result.get("Semester") or smart.get("semester") or smart.get("Semester", ""),
-        "Department": reg.get("Department") or result.get("Department") or smart.get("department") or smart.get("Department", ""),
-        "Registered_Time": reg.get("Registered_Time") or result.get("Created_Time", ""),
-        "Tutor_Username": reg.get("Tutor_Username", ""),
-        "Subjects_JSON": result.get("Subjects_JSON", ""),
-        "CGPA": result.get("CGPA", "") or smart.get("cgpa", "") or smart.get("CGPA", ""),
-        "Earned_Credits": result.get("Earned_Credits", ""),
-        "Total_Study_Hours": result.get("Total_Study_Hours", ""),
-        "DOB": smart.get("dob", smart.get("DOB", "")),
-        "Blood_Group": smart.get("blood_group", smart.get("Blood_Group", "")),
-        "Address": smart.get("address", smart.get("Address", "")),
-        "PIN_Code": smart.get("pin_code", smart.get("PIN_Code", "")),
-        "Studied_College": reg.get("Studied_College", "") or smart.get("studied_college", smart.get("Studied_College", "")),
-        "University_Name": smart.get("university_name", smart.get("University_Name", "")),
-        "_registered_only": not bool(result),
-    }
-    return merged
-
 def find_student(username="", uid=""):
-    uid = str(uid or "").strip()
-    if not uid:
+    # Student authentication is based on University ID; username is kept only
+    # for backward compatibility with older records.
+    uid = str(uid).strip()
+    reg = find_registration(uid)
+    if reg:
+        reports = load_reports()
+        if not reports.empty:
+            found = reports[reports["University_ID"].astype(str).str.lower().eq(uid.lower())]
+            if not found.empty:
+                return found.iloc[0].to_dict()
+        return {
+            "Username": "", "Student_Name": reg["Student_Name"], "University_ID": reg["University_ID"],
+            "Semester": reg["Semester"], "Department": reg["Department"], "Subjects_JSON": "",
+            "Created_Time": reg["Registered_Time"], "_registered_only": True
+        }
+    # Legacy records without registration entry.
+    df = load_reports()
+    if df.empty:
         return None
-    return _get_full_student_details(uid)
+    found = df[df["University_ID"].astype(str).str.lower().eq(uid.lower())]
+    return found.iloc[0].to_dict() if not found.empty else None
 
 # ============================================================
 # PDF
@@ -1514,7 +1496,7 @@ def minute_visual():
 
 def home_page():
     if AUTOREFRESH_AVAILABLE:
-        st_autorefresh(interval=30*60_000, key="home_page_30min_refresh")
+        st_autorefresh(interval=60_000, key="home_page_minute_refresh")
     app_brand()
     visual = minute_visual()
     st.markdown(f"""
@@ -1538,49 +1520,28 @@ def home_page():
         st.session_state.page="smart_card"; st.rerun()
 
     st.markdown("### 👤 Student Profile — Quick Visit")
-    st.caption("Students already registered by a tutor can enter their University ID. Full available profile details are shown even before tutor marks are entered.")
+    st.caption("Enter your University ID + Student Name to view your registered profile directly. Tutor marks are NOT required.")
     with st.form("home_student_profile_lookup"):
         h1, h2 = st.columns(2)
         home_uid = h1.text_input("🪪 University ID", placeholder="e.g. SNM25CE001")
-        home_name = h2.text_input("👤 Student Name (optional)", placeholder="Optional verification")
-        view_profile = st.form_submit_button("🔎 Quick Visit / View Full Profile", type="primary", use_container_width=True)
+        home_name = h2.text_input("👤 Student Name", placeholder="Enter your registered name")
+        view_profile = st.form_submit_button("🔎 View My Profile", type="primary", use_container_width=True)
     if view_profile:
-        if not home_uid.strip():
-            st.error("Please enter the University ID.")
+        if not home_uid.strip() or not home_name.strip():
+            st.error("Please enter both University ID and Student Name.")
         else:
             prof = find_student(home_name.strip(), home_uid.strip())
-            if prof and (not home_name.strip() or str(prof.get("Student_Name", "")).strip().lower() == home_name.strip().lower()):
-                st.success("✅ Full profile found. Tutor marks are not required.")
+            if prof:
+                st.success("✅ Profile found. No tutor marks are required to view this profile.")
                 p1,p2,p3,p4 = st.columns(4)
                 p1.metric("👤 Name", prof.get("Student_Name", "—"))
                 p2.metric("🪪 University ID", prof.get("University_ID", "—"))
                 p3.metric("🏫 Department", prof.get("Department", "—"))
                 p4.metric("📚 Semester", prof.get("Semester", "—"))
-                p5,p6,p7 = st.columns(3)
-                p5.metric("🎓 CGPA", prof.get("CGPA", "—") or "—")
-                p6.metric("🎯 Earned Credits", prof.get("Earned_Credits", "—") or "—")
-                p7.metric("⏱️ Total Study Hours", prof.get("Total_Study_Hours", "—") or "—")
-                st.markdown("#### 📋 Registered / Personal Details")
-                st.dataframe(pd.DataFrame([{
-                    "Student Name": prof.get("Student_Name", ""), "University ID": prof.get("University_ID", ""),
-                    "Department": prof.get("Department", ""), "Semester": prof.get("Semester", ""),
-                    "Studied College": prof.get("Studied_College", ""), "DOB": prof.get("DOB", ""),
-                    "Blood Group": prof.get("Blood_Group", ""), "Address": prof.get("Address", ""),
-                    "PIN Code": prof.get("PIN_Code", ""), "University": prof.get("University_Name", ""),
-                    "Tutor Username": prof.get("Tutor_Username", ""), "Registered At": prof.get("Registered_Time", ""),
-                }]), use_container_width=True, hide_index=True)
-                subs = parse_subjects(prof.get("Subjects_JSON", ""))
-                if subs:
-                    st.markdown("#### 📊 Current Result")
-                    rows=[]
-                    for i,x in enumerate(subs[:6]):
-                        credit = SUBJECT_CREDITS[i] if i < len(SUBJECT_CREDITS) else 0
-                        rows.append({"Subject":x.get("Subject",""),"Score":f"{float(x.get('Overall',0)):.1f}%","Pass":"PASS" if subject_passed(x) else "NOT PASS","Credit":credit if subject_passed(x) else 0,"Study Hours":f"{float(x.get('Study_Hours',0)):.2f} h"})
-                    st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
-                else:
-                    st.info("Student is registered, but tutor marks have not been entered yet.")
+                st.write(f"**Studied College:** {prof.get('Studied_College', '—')}")
+                st.write(f"**Registered At:** {prof.get('Registered_Time', '—')}")
             else:
-                st.error("Profile not found or Student Name does not match the registered record.")
+                st.error("Profile not found. Check the University ID and Student Name.")
 
 
 def login_shell(title, subtitle):
@@ -1653,7 +1614,7 @@ def tutor_account_login_panel():
                     "Month": x.get("salary_month", ""),
                     "Amount": f"₹{float(x.get('amount') or 0):,.2f}",
                     "Reference": x.get("reference", ""),
-                    "Status": "✅ APPROVED / CREDITED" if str(x.get("status", "")).lower() == "credited" else "⏳ PENDING",
+                    "Status": x.get("status", "credited"),
                 }
                 for x in tx
             ])
@@ -1665,7 +1626,7 @@ def tutor_account_login_panel():
 def teacher_login():
     """Normal Tutor Login. Salary account is completely separate."""
     if AUTOREFRESH_AVAILABLE:
-        st_autorefresh(interval=30*60_000, key="teacher_login_30min_refresh")
+        st_autorefresh(interval=60_000, key="teacher_login_minute_refresh")
 
     login_shell("Tutor Login", "Use your Tutor Username and Password")
 
@@ -1755,8 +1716,8 @@ def teacher_login():
     st.session_state.active_department = department
     st.session_state.teacher_menu_view = "menu"
 
-    audit(
-        "Tutor Login", "Tutor", username, "", department, semester,
+    log_action(
+        "Tutor", username, "Tutor Login", "", department, semester,
         f"Successful tutor login; Tutor={tutor_name}; salary account remains separate"
     )
 
@@ -1766,7 +1727,7 @@ def teacher_login():
 
 def student_login():
     if AUTOREFRESH_AVAILABLE:
-        st_autorefresh(interval=30*60_000, key="student_login_30min_refresh")
+        st_autorefresh(interval=60_000, key="student_login_minute_refresh")
     login_shell("Student Login", "Enter your registered University ID")
     with st.form("student_login_form"):
         uid=st.text_input("University ID",placeholder="e.g. SNM25CE001")
@@ -1786,29 +1747,23 @@ def student_login():
 
     st.divider()
     st.subheader("👤 Quick Student Profile Lookup")
-    st.caption("Already-registered students can enter only their University ID. Full available details are shown.")
+    st.caption("Profile can be viewed using University ID + Student Name even when Tutor marks have not been entered yet.")
     with st.form("quick_profile_lookup"):
         q1,q2=st.columns(2)
         lookup_uid=q1.text_input("University ID", key="quick_profile_uid")
-        lookup_name=q2.text_input("Student Name (optional)", key="quick_profile_name")
-        lookup=q1.form_submit_button("🔎 Quick Visit / Full Profile", use_container_width=True)
+        lookup_name=q2.text_input("Student Name", key="quick_profile_name")
+        lookup=q1.form_submit_button("🔎 View Profile", use_container_width=True)
     if lookup:
-        prof=find_student(lookup_name.strip(),lookup_uid.strip()) if lookup_uid.strip() else None
-        if prof and (not lookup_name.strip() or str(prof.get("Student_Name","")).strip().lower()==lookup_name.strip().lower()):
-            st.success("✅ Full student profile found.")
+        prof=find_student(lookup_name.strip(),lookup_uid.strip()) if lookup_uid.strip() and lookup_name.strip() else None
+        if prof:
+            st.success("✅ Student profile found. Tutor marks are not required to view this profile.")
             st.dataframe(pd.DataFrame([{
-                "Student Name":prof.get("Student_Name",""),"University ID":prof.get("University_ID",""),"Department":prof.get("Department",""),"Semester":prof.get("Semester",""),
-                "Studied College":prof.get("Studied_College",""),"DOB":prof.get("DOB",""),"Blood Group":prof.get("Blood_Group",""),"Address":prof.get("Address",""),"PIN Code":prof.get("PIN_Code",""),"University":prof.get("University_Name",""),"Registered At":prof.get("Registered_Time","")
-            }]),use_container_width=True,hide_index=True)
-            m1,m2,m3=st.columns(3); m1.metric("CGPA",prof.get("CGPA","") or "—"); m2.metric("Earned Credits",prof.get("Earned_Credits","") or "—"); m3.metric("Total Study Hours",prof.get("Total_Study_Hours","") or "—")
-            subs=parse_subjects(prof.get("Subjects_JSON",""))
-            if subs:
-                st.dataframe(pd.DataFrame([{
-                    "Subject":x.get("Subject",""),"Score":f"{float(x.get('Overall',0)):.1f}%","Pass":"PASS" if subject_passed(x) else "NOT PASS","Credit":SUBJECT_CREDITS[i] if subject_passed(x) and i<len(SUBJECT_CREDITS) else 0,"Study Hours":f"{float(x.get('Study_Hours',0)):.2f} h"
-                } for i,x in enumerate(subs[:6])]),use_container_width=True,hide_index=True)
-            else: st.info("Registered student found. Tutor marks have not been entered yet.")
+                "Student Name": prof.get("Student_Name",""), "University ID": prof.get("University_ID",""),
+                "Department": prof.get("Department",""), "Semester": prof.get("Semester",""),
+                "Registered Time": prof.get("Registered_Time","")
+            }]), use_container_width=True, hide_index=True)
         else:
-            st.error("Profile not found or Student Name does not match.")
+            st.error("Profile not found. Check the University ID and Student Name.")
 
 
 def smart_card_page():
@@ -2212,7 +2167,6 @@ def tutor_mark_entry(department, semester):
             return
 
         total_credits, _earned = calculate_total_credits(values)
-        cgpa = calculate_student_cgpa(values)
         prediction = automatic_prediction(float(np.mean([float(v.get("Overall", 0)) for v in values])) / 10.0)
         for item in values:
             item["Tutor_Name"] = tutor_name.strip()
@@ -2220,23 +2174,28 @@ def tutor_mark_entry(department, semester):
             item["Automatic_Prediction"] = prediction
             item["Tutor_Completed"] = bool(completed)
             item["Credit"] = int(item.get("Credit", 0))
-            item["CGPA"] = cgpa
-            item["Earned_Credits"] = total_credits
 
         report = make_report("", selected["Student_Name"], selected["University_ID"], semester, department, values)
         upsert_report(report)
         # Explicitly sync tutor identity + credit to the shared Principal portal.
         save_tutor_profile(st.session_state.username, tutor_name.strip(), department, 0.0)
         audit("Student Mark Submission", "Tutor", st.session_state.username, selected["University_ID"], department, semester,
-              f"Tutor={tutor_name.strip()}; Automatic Prediction={prediction}; Earned Credits={total_credits}; CGPA={cgpa:.2f}")
+              f"Tutor={tutor_name.strip()}; Automatic Prediction={prediction}; Earned Credits={total_credits}")
         if completed:
             audit("Tutor Work Completed", "Tutor", st.session_state.username, selected["University_ID"], department, semester,
-                  f"Tutor={tutor_name.strip()}; Earned Credits={total_credits}; CGPA={cgpa:.2f}; Prediction={prediction}; Salary eligible=Yes")
-            st.success(f"✅ Marks saved • Automatic Prediction: **{prediction}** • Earned Credits: **{total_credits}** • CGPA: **{cgpa:.2f}** • 🟢 Tutor work COMPLETED")
+                  f"Tutor={tutor_name.strip()}; Earned Credits={total_credits}; Prediction={prediction}; Salary eligible=Yes")
+            salary_ok, salary_msg = create_pending_salary_for_completed_student(
+                st.session_state.username, tutor_name.strip(), department, semester, selected["University_ID"]
+            )
+            if salary_ok:
+                st.info("🟡 Salary request created as PENDING. Principal approval is required before the amount enters the tutor salary account.")
+            else:
+                st.warning(f"⚠️ Tutor work is completed, but the salary request could not be created automatically: {salary_msg}. The Principal can create the pending request from the Salary Approval tab.")
+            st.success(f"✅ Marks saved • Automatic Prediction: **{prediction}** • Earned Credits: **{total_credits}** • 🟢 Tutor work COMPLETED")
         else:
             audit("Tutor Work Saved - Pending Completion", "Tutor", st.session_state.username, selected["University_ID"], department, semester,
-                  f"Tutor={tutor_name.strip()}; Earned Credits={total_credits}; CGPA={cgpa:.2f}; Prediction={prediction}; Salary eligible=No")
-            st.success(f"✅ Marks saved • Automatic Prediction: **{prediction}** • Earned Credits: **{total_credits}** • CGPA: **{cgpa:.2f}** • 🟡 Pending")
+                  f"Tutor={tutor_name.strip()}; Earned Credits={total_credits}; Prediction={prediction}; Salary eligible=No")
+            st.success(f"✅ Marks saved • Automatic Prediction: **{prediction}** • Earned Credits: **{total_credits}** • 🟡 Pending")
         st.rerun()
 
 
@@ -2409,23 +2368,15 @@ def student_dashboard():
     st.subheader("📊 Calculate My Mark")
     subjects=parse_subjects(report["Subjects_JSON"])
     with st.form("study_hours_form"):
-        st.caption("Enter ONE total daily study-hours value for all 6 subjects. The app automatically distributes that total equally across the six subjects.")
-        total_study_hours=st.number_input("⏱️ Total daily study hours — all 6 subjects",0.0,24.0,2.0,0.5,key="student_total_study_hours")
+        st.caption("Enter your total daily study hours once. This value is applied consistently to all subjects for the prediction.")
+        total_study_hours=st.number_input("⏱️ Total daily study hours",0.0,24.0,2.0,0.5,key="student_total_study_hours")
         calculate=st.form_submit_button("📊 Calculate My Result",use_container_width=True,type="primary")
     if calculate:
         updated=[]
-        per_subject = float(total_study_hours) / max(len(subjects), 1)
         for item in subjects:
-            copy=dict(item); copy["Study_Hours"]=per_subject; updated.append(normalize_subject(copy))
-        report["Subjects_JSON"]=json.dumps(updated)
-        report["Total_Study_Hours"]=round(float(total_study_hours),2)
-        report["CGPA"]=calculate_student_cgpa(updated)
-        report["Earned_Credits"]=calculate_total_credits(updated)[0]
-        subjects=updated; st.session_state.student_report=report
-        # Keep the cloud marks/result synchronized with the student-entered study hours.
-        try: sync_marks_to_supabase(report)
-        except Exception: pass
-        audit("Calculate My Mark","Student","",uid,profile.get("Department",""),profile.get("Semester",""),f"Total daily study hours for all 6 subjects={total_study_hours}; Per subject={per_subject:.2f}")
+            copy=dict(item); copy["Study_Hours"]=float(total_study_hours); updated.append(normalize_subject(copy))
+        report["Subjects_JSON"]=json.dumps(updated); subjects=updated; st.session_state.student_report=report
+        audit("Calculate My Mark","Student","",uid,profile.get("Department",""),profile.get("Semester",""),f"Total daily study hours={total_study_hours}")
 
     subjects=parse_subjects(st.session_state.student_report["Subjects_JSON"])
     overall=float(np.mean([x["Overall"] for x in subjects])) if subjects else 0
@@ -2447,7 +2398,6 @@ def student_dashboard():
         d1,d2=st.columns(2)
         d1.markdown(f'<div class="metric-card"><div class="label">🎓 Total Earned Credits</div><div class="value">{total_credits}/{max_credits}</div></div>',unsafe_allow_html=True)
         d2.markdown(f'<div class="metric-card"><div class="label">Automatic Prediction</div><div class="value">{tutor_prediction}</div></div>',unsafe_allow_html=True)
-        st.info(f"⏱️ Total study time for all 6 subjects: **{float(report.get('Total_Study_Hours', sum(float(x.get('Study_Hours',0)) for x in subjects)) or 0):.2f} hours/day** • 🎓 Automatic CGPA: **{calculate_student_cgpa(subjects):.2f}/10**")
         if earned_credit_subjects:
             st.success("✅ Credits earned: " + ", ".join(earned_credit_subjects))
         else:
