@@ -829,14 +829,36 @@ def save_tutor_profile(username, tutor_name, department, credit_score):
     sync_tutor_profile_to_supabase(username, tutor_name, department, credit_score)
 
 def get_tutor_profile(username):
-    df=load_tutor_profiles()
-    if df.empty: return {"Tutor_Username":username,"Tutor_Name":"","Department":"","Credit_Score":0.0}
-    x=df[df["Tutor_Username"].astype(str).eq(str(username))]
-    if x.empty: return {"Tutor_Username":username,"Tutor_Name":"","Department":"","Credit_Score":0.0}
-    r=x.iloc[0].to_dict()
-    try:r["Credit_Score"]=float(r.get("Credit_Score",0))
-    except:r["Credit_Score"]=0.0
-    return r
+    """Return a safe tutor profile without ever raising a missing-name error."""
+    username = str(username or "").strip()
+    default_name = str(st.session_state.get("teacher_name") or username or "Tutor").strip()
+    fallback = {"Tutor_Username": username, "Tutor_Name": default_name, "Department": str(st.session_state.get("teacher_department") or ""), "Credit_Score": 0.0}
+    try:
+        df = load_tutor_profiles()
+        if df is None or df.empty or "Tutor_Username" not in df.columns:
+            return fallback
+        x = df[df["Tutor_Username"].astype(str).str.strip().eq(username)]
+        if x.empty:
+            return fallback
+        r = x.iloc[0].to_dict()
+        saved_name = str(r.get("Tutor_Name") or "").strip()
+        r["Tutor_Name"] = saved_name or default_name
+        try:
+            r["Credit_Score"] = float(r.get("Credit_Score", 0) or 0)
+        except Exception:
+            r["Credit_Score"] = 0.0
+        return r
+    except Exception:
+        return fallback
+
+
+def get_current_tutor_name():
+    """Single source of truth for the displayed tutor name."""
+    username = str(st.session_state.get("username") or "").strip()
+    profile = get_tutor_profile(username)
+    name = str(profile.get("Tutor_Name") or st.session_state.get("teacher_name") or username or "Tutor").strip()
+    st.session_state["teacher_name"] = name
+    return name
 
 def get_tutor_credit_score(username): return float(get_tutor_profile(username).get("Credit_Score",0.0))
 
@@ -2143,7 +2165,7 @@ def tutor_mark_entry(department, semester):
 
     st.info(f"👨‍🏫 Tutor: **{default_tutor_name}**  •  Department: **{department}**  •  Semester: **{semester}**")
     with st.form("mark_entry_form"):
-        tutor_name = st.text_input("👨‍🏫 Tutor Name *", value=default_tutor_name)
+        tutor_name = st.text_input("👨‍🏫 Tutor Name *", value=get_current_tutor_name(), key="mark_entry_tutor_name")
         values = []
         for i, subject in enumerate(subjects):
             oldx = old_map.get(subject, {})
@@ -2179,6 +2201,7 @@ def tutor_mark_entry(department, semester):
         upsert_report(report)
         # Explicitly sync tutor identity + credit to the shared Principal portal.
         save_tutor_profile(st.session_state.username, tutor_name.strip(), department, 0.0)
+        st.session_state["teacher_name"] = tutor_name.strip()
         audit("Student Mark Submission", "Tutor", st.session_state.username, selected["University_ID"], department, semester,
               f"Tutor={tutor_name.strip()}; Automatic Prediction={prediction}; Earned Credits={total_credits}")
         if completed:
@@ -2229,11 +2252,12 @@ def tutor_student_files(department, semester):
 def tutor_profile_tab():
     st.subheader("👨‍🏫 Tutor Profile"); profile=get_tutor_profile(st.session_state.username)
     with st.form("tutor_profile_form"):
-        tutor_name=st.text_input("Tutor Name",value=str(profile.get("Tutor_Name","")),placeholder="Enter tutor full name")
+        tutor_name=st.text_input("Tutor Name",value=str(profile.get("Tutor_Name") or get_current_tutor_name()),placeholder="Enter tutor full name", key="tutor_profile_name")
         save=st.form_submit_button("💾 Save Tutor Details",type="primary")
     if save:
         if not tutor_name.strip(): st.error("Enter tutor name."); return
         save_tutor_profile(st.session_state.username,tutor_name,st.session_state.teacher_department,0.0)
+        st.session_state["teacher_name"] = tutor_name.strip()
         audit("Tutor Profile Updated","Tutor",st.session_state.username,"",st.session_state.teacher_department,"",f"Tutor={tutor_name}")
         st.success("✅ Tutor name saved.")
 
@@ -2242,7 +2266,7 @@ def teacher_dashboard():
     assigned_department = st.session_state.get("teacher_department") or DEPARTMENTS[0]
     st.title("👨‍🏫 Tutor Dashboard")
     tutor_profile=get_tutor_profile(st.session_state.username)
-    tutor_display=tutor_profile.get("Tutor_Name") or st.session_state.username
+    tutor_display=get_current_tutor_name()
     st.info(f"Tutor: **{tutor_display}**  •  Department: **{assigned_department}**")
     st.caption("💳 Salary Account is separate. Open it from the 👤 account icon on the Tutor Login page.")
     c1,c2,c3 = st.columns([2.2,1.0,0.8])
