@@ -1,8 +1,8 @@
-streamlit
-pandas
-numpy
-scikit-learn
-reportlab
-Pillow
-supabase
-streamlit-autorefresh
+streamlit>=1.40,<2
+pandas>=2.0,<3
+numpy>=1.24,<3
+supabase>=2.0,<3
+reportlab>=4.0,<5
+Pillow>=10.0,<13
+scikit-learn>=1.4,<2
+streamlit-autorefresh>=1.0,<2
