@@ -6,6 +6,7 @@ import io
 import json
 import re
 import base64
+import math
 from pathlib import Path
 from html import escape
 from datetime import datetime
@@ -49,6 +50,19 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="collapsed",
 )
+
+
+def safe_rerun():
+    """Run a Streamlit rerun on both newer and older Streamlit versions."""
+    rerun = getattr(st, "rerun", None)
+    if callable(rerun):
+        rerun()
+        return
+    legacy = getattr(st, "experimental_rerun", None)
+    if callable(legacy):
+        legacy()
+        return
+    raise RuntimeError("This Streamlit version does not support rerun. Update Streamlit with: python -m pip install -U streamlit")
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(BASE_DIR, "data")
@@ -1118,12 +1132,20 @@ def performance_circle(level):
     }.get(level, "⚪")
 
 
+def _safe_number(value, default=0.0):
+    try:
+        number = float(value)
+        return number if math.isfinite(number) else float(default)
+    except (TypeError, ValueError):
+        return float(default)
+
+
 def normalize_subject(data):
-    attendance = max(0.0, min(float(data.get("Attendance", 0)), 100.0))
-    study = max(0.0, min(float(data.get("Study_Hours", 0)), 6.0))
-    internal = max(0.0, min(float(data.get("Internal", 0)), 40.0))
-    assignment = max(0.0, min(float(data.get("Assignment", 0)), 15.0))
-    previous = max(0.0, min(float(data.get("Previous", 0)), 60.0))
+    attendance = max(0.0, min(_safe_number(data.get("Attendance", 0)), 100.0))
+    study = max(0.0, min(_safe_number(data.get("Study_Hours", 0)), 6.0))
+    internal = max(0.0, min(_safe_number(data.get("Internal", 0)), 40.0))
+    assignment = max(0.0, min(_safe_number(data.get("Assignment", 0)), 15.0))
+    previous = max(0.0, min(_safe_number(data.get("Previous", 0)), 60.0))
 
     # Requested attendance conversion: percentage -> 5-point mark.
     att_mark = attendance_mark(attendance)
@@ -1446,7 +1468,7 @@ def all_department_dashboard():
     if c1.button("⬅️ Back to Tutor Dashboard", use_container_width=True):
         st.session_state.dashboard_view = "department"
         st.session_state.page = "teacher_dashboard"
-        st.rerun()
+        safe_rerun()
     if c2.button("🚪 Logout", use_container_width=True):
         logout()
 
@@ -1528,7 +1550,7 @@ def uploaded_to_reports(uploaded_file, tutor_department):
 def logout():
     for key, value in DEFAULT_STATE.items():
         st.session_state[key] = value
-    st.rerun()
+    safe_rerun()
 
 
 def minute_visual():
@@ -1554,11 +1576,11 @@ def home_page():
     st.write("")
     a,b,c=st.columns(3)
     if a.button("👨‍🏫 Tutor Login",use_container_width=True,type="primary"):
-        st.session_state.page="teacher_login"; st.rerun()
+        st.session_state.page="teacher_login"; safe_rerun()
     if b.button("🎓 Student Login",use_container_width=True):
-        st.session_state.page="student_login"; st.rerun()
+        st.session_state.page="student_login"; safe_rerun()
     if c.button("🪪 Student Smart Card (Self Registration)",use_container_width=True):
-        st.session_state.page="smart_card"; st.rerun()
+        st.session_state.page="smart_card"; safe_rerun()
 
     st.markdown("### 👤 Student Profile — Quick Visit")
     st.caption("Enter your University ID + Student Name to view your registered profile directly. Tutor marks are NOT required.")
@@ -1684,7 +1706,7 @@ def teacher_login():
 
     if st.button("👤", key="tutor_account_circle", help="Tutor Salary Account"):
         st.session_state.show_tutor_create = not st.session_state.get("show_tutor_create", False)
-        st.rerun()
+        safe_rerun()
 
     if st.session_state.get("show_tutor_create", False):
         tab_create, tab_account = st.tabs(["🆕 Create Account", "💳 Account Login"])
@@ -1713,7 +1735,7 @@ def teacher_login():
 
     if back:
         st.session_state.page = "home"
-        st.rerun()
+        safe_rerun()
 
     if not login:
         return
@@ -1764,7 +1786,7 @@ def teacher_login():
 
     st.session_state.show_tutor_create = False
     st.session_state.page = "teacher_dashboard"
-    st.rerun()
+    safe_rerun()
 
 def student_login():
     if AUTOREFRESH_AVAILABLE:
@@ -1776,14 +1798,14 @@ def student_login():
         login=c1.form_submit_button("🎓 Open Dashboard",use_container_width=True,type="primary")
         back=c2.form_submit_button("← Back",use_container_width=True)
     if back:
-        st.session_state.page="home"; st.rerun()
+        st.session_state.page="home"; safe_rerun()
     if login:
         student=find_student("",uid)
         if student:
             st.session_state.logged_in=True; st.session_state.role="student"; st.session_state.username=""
             st.session_state.student_report=student
             audit("Student Login","Student","",uid,student.get("Department",""),student.get("Semester",""),"Successful login")
-            st.session_state.page="student_dashboard"; st.rerun()
+            st.session_state.page="student_dashboard"; safe_rerun()
         else: st.error("No registered student found for this University ID.")
 
     st.divider()
@@ -1829,7 +1851,7 @@ def smart_card_page():
         st.info("Enter your University ID to start your own Smart Card registration.")
         if st.button("← Back to Home", use_container_width=True):
             st.session_state.page = "home"
-            st.rerun()
+            safe_rerun()
         return
 
     # Existing tutor/student profile is only used for optional pre-filling.
@@ -2044,7 +2066,7 @@ def smart_card_page():
             if st.session_state.get("logged_in") and st.session_state.get("role") == "student"
             else "home"
         )
-        st.rerun()
+        safe_rerun()
 
 # ============================================================
 # K-MEANS TUTOR ANALYSIS
@@ -2238,7 +2260,7 @@ def tutor_mark_entry(department, semester):
             audit("Tutor Work Saved - Pending Completion", "Tutor", st.session_state.username, selected["University_ID"], department, semester,
                   f"Tutor={tutor_name.strip()}; Earned Credits={total_credits}; Prediction={prediction}; Salary eligible=No")
             st.success(f"✅ Marks saved • Automatic Prediction: **{prediction}** • Earned Credits: **{total_credits}** • 🟡 Pending")
-        st.rerun()
+        safe_rerun()
 
 
 def tutor_student_files(department, semester):
@@ -2293,7 +2315,7 @@ def teacher_dashboard():
     default_sem=str(st.session_state.get("teacher_semester","S3")).upper(); sem_index=SEMESTERS.index(default_sem) if default_sem in SEMESTERS else 2
     semester = c2.selectbox("📚 Semester", SEMESTERS, index=sem_index, key="dashboard_semester")
     if c3.button("➡️ Next Dashboard", use_container_width=True):
-        st.session_state.page = "all_department_analysis"; st.rerun()
+        st.session_state.page = "all_department_analysis"; safe_rerun()
     subjects = get_subjects(department, semester)
     if len(subjects) != 6:
         st.error(f"No complete 6-subject mapping is configured for **{department} — {semester}**.")
@@ -2371,7 +2393,7 @@ def teacher_dashboard():
                 uid = str(selected_student["University_ID"])
                 delete_student(uid, str(selected_student.get("Department", department)), str(selected_student.get("Semester", semester)), st.session_state.get("username", ""))
                 st.success(f"✅ {uid} and all linked student details were deleted.")
-                st.rerun()
+                safe_rerun()
 
 # ============================================================
 # STUDENT WORKFLOW
@@ -2393,7 +2415,7 @@ def student_dashboard():
     st.markdown("<div class='friendly-note'>💡 Use the buttons below for your Smart Card or logout. Your profile, tutor files and performance result are shown in simple sections.</div>",unsafe_allow_html=True)
     c1,c2=st.columns(2)
     if c1.button("🪪 Student Smart Card (Self Registration)",use_container_width=True,type="primary"):
-        st.session_state.smart_card_registration=find_smart_card_registration(uid); st.session_state.smart_card_hidden=False; st.session_state.page="smart_card"; st.rerun()
+        st.session_state.smart_card_registration=find_smart_card_registration(uid); st.session_state.smart_card_hidden=False; st.session_state.page="smart_card"; safe_rerun()
     if c2.button("🚪 Logout",use_container_width=True):
         audit("Student Logout","Student","",uid,profile.get("Department",""),profile.get("Semester",""),"Logout")
         logout()
@@ -2475,10 +2497,8 @@ def student_dashboard():
         card=create_student_card_png(profile)
         if card: c2.download_button("🪪 Download Smart Card PNG",card,f"{uid}_Smart_Card.png","image/png",use_container_width=True)
 
-# Clear obsolete widget keys from earlier versions if they exist.
-for _old_key in ("active_department", "manual_department_selector", "manual_semester_selector"):
-    if _old_key in st.session_state:
-        del st.session_state[_old_key]
+# Legacy session keys are intentionally retained for compatibility with saved sessions.
+# They no longer control the current dashboard UI.
 
 # ============================================================
 # ROUTER
@@ -2499,4 +2519,4 @@ elif st.session_state.page == "student_dashboard" and st.session_state.logged_in
     student_dashboard()
 else:
     st.session_state.page = "home"
-    st.rerun()
+    safe_rerun()
