@@ -2454,6 +2454,28 @@ def student_dashboard():
         card=create_student_card_png(profile)
         if card: c2.download_button("🪪 Download Smart Card PNG",card,f"{uid}_Smart_Card.png","image/png",use_container_width=True)
 
+
+def main():
+    """Run the Tutor + Student Streamlit application."""
+    if st.session_state.page == "home":
+        home_page()
+    elif st.session_state.page == "teacher_login":
+        teacher_login()
+    elif st.session_state.page == "student_login":
+        student_login()
+    elif st.session_state.page == "smart_card":
+        smart_card_page()
+    elif st.session_state.page == "teacher_dashboard" and st.session_state.logged_in and st.session_state.role == "teacher":
+        teacher_dashboard()
+    elif st.session_state.page == "all_department_analysis" and st.session_state.logged_in and st.session_state.role == "teacher":
+        all_department_dashboard()
+    elif st.session_state.page == "student_dashboard" and st.session_state.logged_in and st.session_state.role == "student":
+        student_dashboard()
+    else:
+        st.session_state.page = "home"
+        st.rerun()
+
+
 # Clear obsolete widget keys from earlier versions if they exist.
 for _old_key in ("active_department", "manual_department_selector", "manual_semester_selector"):
     if _old_key in st.session_state:
@@ -2462,20 +2484,4 @@ for _old_key in ("active_department", "manual_department_selector", "manual_seme
 # ============================================================
 # ROUTER
 # ============================================================
-if st.session_state.page == "home":
-    home_page()
-elif st.session_state.page == "teacher_login":
-    teacher_login()
-elif st.session_state.page == "student_login":
-    student_login()
-elif st.session_state.page == "smart_card":
-    smart_card_page()
-elif st.session_state.page == "teacher_dashboard" and st.session_state.logged_in and st.session_state.role == "teacher":
-    teacher_dashboard()
-elif st.session_state.page == "all_department_analysis" and st.session_state.logged_in and st.session_state.role == "teacher":
-    all_department_dashboard()
-elif st.session_state.page == "student_dashboard" and st.session_state.logged_in and st.session_state.role == "student":
-    student_dashboard()
-else:
-    st.session_state.page = "home"
-    st.rerun()
+main()
