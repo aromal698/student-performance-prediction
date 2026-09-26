@@ -683,18 +683,31 @@ def load_tutor_accounts():
 
 
 def _save_tutor_account_local(email, tutor_name, department, semester, tutor_id=None):
+    """Save a local backup of the Tutor account without pandas assignment/type errors."""
     email = _normalise_tutor_email(email)
+    tutor_id = _normalise_tutor_email(tutor_id or email)
+    row = {
+        "Email": email,
+        "Tutor_Name": str(tutor_name or "").strip(),
+        "Department": str(department or "").strip(),
+        "Semester": str(semester or "").strip().upper(),
+        "Tutor_ID": tutor_id,
+        "Created_Time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "Last_Login": "",
+    }
     df = load_tutor_accounts()
-    tutor_id = tutor_id or email
-    row = {"Email":email,"Tutor_Name":str(tutor_name).strip(),"Department":str(department).strip(),"Semester":str(semester).strip().upper(),"Tutor_ID":str(tutor_id).strip(),"Created_Time":datetime.now().strftime("%Y-%m-%d %H:%M:%S"),"Last_Login":""}
     if not df.empty:
-        mask=df["Email"].astype(str).str.lower().eq(email)
+        mask = df["Email"].astype(str).str.strip().str.lower().eq(email)
         if mask.any():
-            old=df[mask].iloc[0].to_dict(); row["Created_Time"]=old.get("Created_Time",row["Created_Time"]); row["Last_Login"]=old.get("Last_Login","")
-            df.loc[mask,list(row.keys())]=list(row.values())
-        else: df=pd.concat([df,pd.DataFrame([row])],ignore_index=True)
-    else: df=pd.DataFrame([row],columns=TUTOR_ACCOUNT_COLUMNS)
-    df.to_csv(TUTOR_ACCOUNT_FILE,index=False)
+            old = df.loc[mask].iloc[0].to_dict()
+            row["Created_Time"] = str(old.get("Created_Time") or row["Created_Time"])
+            row["Last_Login"] = str(old.get("Last_Login") or "")
+            df = df.loc[~mask].copy()
+        df = pd.concat([df, pd.DataFrame([row], columns=TUTOR_ACCOUNT_COLUMNS)], ignore_index=True)
+    else:
+        df = pd.DataFrame([row], columns=TUTOR_ACCOUNT_COLUMNS)
+    df = df.reindex(columns=TUTOR_ACCOUNT_COLUMNS, fill_value="")
+    df.to_csv(TUTOR_ACCOUNT_FILE, index=False)
     return row
 
 
@@ -715,7 +728,12 @@ def create_tutor_account(email, tutor_name, department, semester):
         local=load_tutor_accounts()
         if not local.empty and local["Email"].astype(str).str.lower().eq(email).any(): return local[local["Email"].astype(str).str.lower().eq(email)].iloc[0].to_dict(),"This email already has a tutor account."
         row=_save_tutor_account_local(email,tutor_name,department,semester,email); save_tutor_profile(email,tutor_name,department,0.0); return row,"created"
-    except Exception as exc: return None,f"Account creation failed: {exc}"
+    except Exception as exc:
+        msg = str(exc)
+        if "tutor_accounts" in msg and ("PGRST205" in msg or "schema cache" in msg or "relation" in msg):
+            return None, ("Supabase table `tutor_accounts` is missing. Run the supplied "
+                          "tutor_salary_setup.sql in Supabase SQL Editor, then refresh this app.")
+        return None, f"Account creation failed: {msg}"
 
 
 def get_tutor_account(email):
